@@ -124,6 +124,15 @@ function statusPainelFromLinha(statusLinha) {
   };
 }
 
+function parseBooleanLike(value, fallback = true) {
+  if (value == null) return fallback;
+  if (typeof value === 'boolean') return value;
+  const raw = String(value).trim().toLowerCase();
+  if (['1', 'true', 'sim', 's', 'yes', 'y'].includes(raw)) return true;
+  if (['0', 'false', 'nao', 'não', 'n', 'no'].includes(raw)) return false;
+  return fallback;
+}
+
 
 // GET /cadastro?page=1&limit=20&nome=FRANCISCA
 router.get('/', async (req, res) => {
@@ -169,6 +178,63 @@ router.get('/', async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /cadastro/com-convenio?titulo=FIDELICARD&page=1&limit=50
+router.get('/com-convenio', async (req, res) => {
+  const titulo = String(req.query.titulo || 'FIDELICARD').trim();
+  const pageNumber = Number(req.query.page || 1);
+  const limitNumber = Number(req.query.limit || 50);
+  const startRow = (pageNumber - 1) * limitNumber + 1;
+  const endRow = pageNumber * limitNumber;
+
+  try {
+    const pool = await connectDB();
+    const request = pool.request()
+      .input('titulo', `%${titulo}%`)
+      .input('startRow', startRow)
+      .input('endRow', endRow);
+
+    const result = await request.query(`
+      ;WITH Base AS (
+        SELECT
+          c.CodigoCliente,
+          c.CodigoCadastro,
+          cad.Nome AS NomeCliente,
+          cad.CPFCNPJ,
+          cv.CodigoConvenio,
+          cadConv.Nome AS NomeConvenio,
+          cc.CodigoClienteID,
+          cc.Status AS StatusConvenio,
+          cc.DataCadastro AS DataCadastroConvenio,
+          ROW_NUMBER() OVER (ORDER BY c.CodigoCliente DESC) AS RowNum
+        FROM INOVAFARMA_DPOPPARA.dbo.Cliente c
+        JOIN INOVAFARMA_DPOPPARA.dbo.Cadastro cad
+          ON cad.CodigoCadastro = c.CodigoCadastro
+        JOIN INOVAFARMA_DPOPPARA.dbo.Cliente_Convenio cc
+          ON cc.CodigoCliente = c.CodigoCliente
+        JOIN INOVAFARMA_DPOPPARA.dbo.Convenio cv
+          ON cv.CodigoConvenio = cc.CodigoConvenio
+        JOIN INOVAFARMA_DPOPPARA.dbo.Cadastro cadConv
+          ON cadConv.CodigoCadastro = cv.CodigoCadastro
+        WHERE UPPER(LTRIM(RTRIM(cadConv.Nome))) LIKE UPPER(LTRIM(RTRIM(@titulo)))
+      )
+      SELECT *
+      FROM Base
+      WHERE RowNum BETWEEN @startRow AND @endRow
+      ORDER BY RowNum
+    `);
+
+    return res.json({
+      pagina: pageNumber,
+      limite: limitNumber,
+      total: result.recordset.length,
+      tituloConvenio: titulo,
+      dados: result.recordset,
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
   }
 });
 
@@ -230,6 +296,9 @@ router.post('/', async (req, res) => {
 
     const maxCliente = Number(maxClienteResult.recordset[0].maxCliente || 0);
     const proximoCodigoCliente = maxCliente === 0 ? 1 : maxCliente + 1;
+
+    const criarConvenioFidelicard = parseBooleanLike(req.body.vincularConvenioFidelicard, true);
+    const tituloConvenio = String(req.body.tituloConvenio || 'FIDELICARD').trim();
 
     // Garante vinculo em Cliente para o cadastro aparecer no painel.
     const clienteInsert = await new sql.Request(transaction)
@@ -306,6 +375,100 @@ router.post('/', async (req, res) => {
       codigoCliente = clienteExistente.recordset[0]?.CodigoCliente ?? null;
     }
 
+    let convenioVinculado = null;
+
+    if (criarConvenioFidelicard && codigoCliente != null) {
+      const convenioResult = await new sql.Request(transaction)
+        .input('tituloConvenio', `%${tituloConvenio}%`)
+        .query(`
+          SELECT TOP 1
+            cv.CodigoConvenio,
+            cadConv.Nome AS NomeConvenio
+          FROM INOVAFARMA_DPOPPARA.dbo.Convenio cv
+          JOIN INOVAFARMA_DPOPPARA.dbo.Cadastro cadConv
+            ON cadConv.CodigoCadastro = cv.CodigoCadastro
+          WHERE UPPER(LTRIM(RTRIM(cadConv.Nome))) LIKE UPPER(LTRIM(RTRIM(@tituloConvenio)))
+            AND ISNULL(cv.Ativo, 0) = 1
+          ORDER BY CASE WHEN UPPER(LTRIM(RTRIM(cadConv.Nome))) = UPPER(LTRIM(RTRIM(@tituloConvenio))) THEN 0 ELSE 1 END,
+                   cv.CodigoConvenio
+        `);
+
+      if (convenioResult.recordset.length > 0) {
+        const codigoConvenio = convenioResult.recordset[0].CodigoConvenio;
+
+        const maxClienteConvenioIdResult = await new sql.Request(transaction).query(`
+          SELECT ISNULL(MAX(CodigoClienteID), 0) AS maxClienteConvenioID
+          FROM INOVAFARMA_DPOPPARA.dbo.Cliente_Convenio WITH (UPDLOCK, HOLDLOCK)
+        `);
+
+        const maxClienteConvenioID = Number(maxClienteConvenioIdResult.recordset[0].maxClienteConvenioID || 0);
+        const proximoCodigoClienteID = maxClienteConvenioID === 0 ? 1 : maxClienteConvenioID + 1;
+
+        const insertConvenio = await new sql.Request(transaction)
+          .input('CodigoClienteID', proximoCodigoClienteID)
+          .input('CodigoCliente', codigoCliente)
+          .input('CodigoConvenio', codigoConvenio)
+          .query(`
+            INSERT INTO INOVAFARMA_DPOPPARA.dbo.Cliente_Convenio (
+              CodigoClienteID,
+              CodigoCliente,
+              CodigoConvenio,
+              Matricula,
+              NumeroCartao,
+              LimiteCredito,
+              DataCadastro,
+              Status,
+              InformarPrescritorNasVendas
+            )
+            OUTPUT INSERTED.CodigoClienteID, INSERTED.CodigoCliente, INSERTED.CodigoConvenio
+            SELECT
+              @CodigoClienteID,
+              @CodigoCliente,
+              @CodigoConvenio,
+              NULL,
+              NULL,
+              0,
+              GETDATE(),
+              0,
+              0
+            WHERE NOT EXISTS (
+              SELECT 1
+              FROM INOVAFARMA_DPOPPARA.dbo.Cliente_Convenio
+              WHERE CodigoCliente = @CodigoCliente
+                AND CodigoConvenio = @CodigoConvenio
+            )
+          `);
+
+        if (insertConvenio.recordset.length > 0) {
+          convenioVinculado = {
+            criado: true,
+            CodigoClienteID: insertConvenio.recordset[0].CodigoClienteID,
+            CodigoCliente: insertConvenio.recordset[0].CodigoCliente,
+            CodigoConvenio: insertConvenio.recordset[0].CodigoConvenio,
+            NomeConvenio: convenioResult.recordset[0].NomeConvenio,
+          };
+        } else {
+          const convenioExistente = await new sql.Request(transaction)
+            .input('CodigoCliente', codigoCliente)
+            .input('CodigoConvenio', codigoConvenio)
+            .query(`
+              SELECT TOP 1 CodigoClienteID, CodigoCliente, CodigoConvenio
+              FROM INOVAFARMA_DPOPPARA.dbo.Cliente_Convenio
+              WHERE CodigoCliente = @CodigoCliente
+                AND CodigoConvenio = @CodigoConvenio
+            `);
+
+          convenioVinculado = {
+            criado: false,
+            CodigoClienteID: convenioExistente.recordset[0]?.CodigoClienteID ?? null,
+            CodigoCliente: convenioExistente.recordset[0]?.CodigoCliente ?? codigoCliente,
+            CodigoConvenio: convenioExistente.recordset[0]?.CodigoConvenio ?? codigoConvenio,
+            NomeConvenio: convenioResult.recordset[0].NomeConvenio,
+          };
+        }
+      }
+    }
+
     const statusResult = await new sql.Request(transaction)
       .input('CodigoCadastro', proximoCadastro)
       .query(`
@@ -331,7 +494,13 @@ router.post('/', async (req, res) => {
       cliente: {
         CodigoCliente: codigoCliente,
       },
+      cliente_convenio: convenioVinculado,
       validacao_tabelas: statusPainel,
+      regra_convenio: {
+        titulo: tituloConvenio,
+        vincularNoPost: criarConvenioFidelicard,
+        vinculado: convenioVinculado != null ? 'SIM' : 'NAO',
+      },
       codigos_gerados: {
         CodigoCadastro: proximoCadastro,
         CodigoLancamento: proximoLancamento.toString(),
