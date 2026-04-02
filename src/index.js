@@ -7,10 +7,12 @@ app.use(express.json());
 
 // Rotas
 const tabelasRouter = require('./routes/tabelas');
-const cadastroRouter = require('./routes/cadastro'); // ← adicionar
+const cadastroRouter = require('./routes/cadastro');
+const fidelidadeRouter = require('./routes/fidelidade');
 
 app.use('/tabelas', tabelasRouter);
-app.use('/cadastro', cadastroRouter); // ← adicionar
+app.use('/cadastro', cadastroRouter);
+app.use('/fidelidade-ponto', fidelidadeRouter);
 
 // Health check
 app.get('/health', async (req, res) => {
