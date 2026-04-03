@@ -10,11 +10,13 @@ const tabelasRouter = require('./routes/tabelas');
 const cadastroRouter = require('./routes/cadastro');
 const fidelidadeRouter = require('./routes/fidelidade');
 const fidelidadePremioRouter = require('./routes/fidelidade-premio');
+const vendasRouter = require('./routes/vendas');
 
 app.use('/tabelas', tabelasRouter);
 app.use('/cadastro', cadastroRouter);
 app.use('/fidelidade-ponto', fidelidadeRouter);
 app.use('/fidelidade-premio', fidelidadePremioRouter);
+app.use('/vendas', vendasRouter);
 
 // Health check
 app.get('/health', async (req, res) => {
