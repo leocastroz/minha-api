@@ -5,6 +5,8 @@ require('dotenv').config();
 const app = express();
 app.use(express.json());
 
+const { swaggerUi, swaggerUiOptions, swaggerSpec } = require('./swagger');
+
 // Rotas
 const tabelasRouter = require('./routes/tabelas');
 const cadastroRouter = require('./routes/cadastro');
@@ -17,6 +19,12 @@ app.use('/cadastro', cadastroRouter);
 app.use('/fidelidade-ponto', fidelidadeRouter);
 app.use('/fidelidade-premio', fidelidadePremioRouter);
 app.use('/vendas', vendasRouter);
+
+// Documentacao Swagger
+app.get('/docs.json', (req, res) => {
+  res.json(swaggerSpec);
+});
+app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, swaggerUiOptions));
 
 // Health check
 app.get('/health', async (req, res) => {
