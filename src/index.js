@@ -1,8 +1,10 @@
 const express = require('express');
+const cors = require('cors');
 const { connectDB } = require('./db');
 require('dotenv').config();
 
 const app = express();
+app.use(cors());
 app.use(express.json());
 
 const { swaggerUi, swaggerUiOptions, swaggerSpec } = require('./swagger');
@@ -36,7 +38,28 @@ app.get('/health', async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 3000;
+app.use((req, res) => {
+  res.status(404).json({
+    error: 'Rota nao encontrada',
+    erro: 'Rota nao encontrada',
+    mensagem: `Nao existe endpoint para ${req.method} ${req.originalUrl}`,
+  });
+});
+
+app.use((err, req, res, next) => {
+  console.error('[ERRO GLOBAL]', err);
+
+  const status = err.status || 500;
+  const mensagem = err.message || 'Erro interno do servidor';
+
+  res.status(status).json({
+    error: mensagem,
+    erro: mensagem,
+    mensagem,
+  });
+});
+
+const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
   console.log(`🚀 API rodando em http://localhost:${PORT}`);
 });
