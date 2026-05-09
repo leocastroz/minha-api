@@ -153,15 +153,18 @@ router.get('/', async (req, res) => {
     let where = '';
     if (nome) {
       request.input('nome', `%${nome}%`);
-      where = `WHERE LTRIM(RTRIM(Nome)) LIKE LTRIM(RTRIM(@nome))`;
+      where = `WHERE LTRIM(RTRIM(cad.Nome)) LIKE LTRIM(RTRIM(@nome))`;
     }
 
     const result = await request.query(`
       ;WITH CadastroPaginado AS (
         SELECT
-          *,
-          ROW_NUMBER() OVER (ORDER BY Nome) AS RowNum
-        FROM INOVAFARMA_DPOPPARA.dbo.Cadastro
+          cad.*,
+          cli.CodigoCliente,
+          ROW_NUMBER() OVER (ORDER BY cad.Nome) AS RowNum
+        FROM INOVAFARMA_DPOPPARA.dbo.Cadastro cad
+        LEFT JOIN INOVAFARMA_DPOPPARA.dbo.Cliente cli
+          ON cli.CodigoCadastro = cad.CodigoCadastro
         ${where}
       )
       SELECT *

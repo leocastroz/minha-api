@@ -1,0 +1,585 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Minha API - Fidelidade & Vendas",
+    "version": "2.0.0",
+    "description": "APIs Ajustadas com Suporte a Múltiplos Identificadores (CodigoCliente, CodigoCadastro, CPFCNPJ)",
+    "contact": {
+      "name": "API Support",
+      "url": "http://localhost:3000"
+    },
+    "license": {
+      "name": "MIT"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:3000",
+      "description": "Servidor de Desenvolvimento"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Fidelidade & Resgate",
+      "description": "Endpoints para consultar resgates de fidelidade do cliente"
+    },
+    {
+      "name": "Vendas & Compras",
+      "description": "Endpoints para consultar histórico completo de compras do cliente"
+    }
+  ],
+  "components": {
+    "schemas": {
+      "Erro": {
+        "type": "object",
+        "properties": {
+          "erro": {
+            "type": "string",
+            "example": "Cliente não encontrado"
+          },
+          "codigo": {
+            "type": "integer",
+            "example": 404
+          }
+        }
+      },
+      "ClienteInfo": {
+        "type": "object",
+        "properties": {
+          "codigoCliente": {
+            "type": "integer",
+            "example": 123
+          },
+          "codigoCadastro": {
+            "type": "integer",
+            "example": 456
+          },
+          "nome": {
+            "type": "string",
+            "example": "João da Silva"
+          },
+          "cpfCnpj": {
+            "type": "string",
+            "example": "123.456.789-00"
+          },
+          "tipoPessoa": {
+            "type": "string",
+            "example": "Física",
+            "enum": ["Física", "Jurídica"]
+          },
+          "ativo": {
+            "type": "boolean",
+            "example": true
+          }
+        }
+      },
+      "Resgate": {
+        "type": "object",
+        "properties": {
+          "codigoResgate": {
+            "type": "integer",
+            "example": 1001
+          },
+          "codigoCliente": {
+            "type": "integer",
+            "example": 123
+          },
+          "dataResgate": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-05-08T10:30:00Z"
+          },
+          "pontos": {
+            "type": "integer",
+            "example": 500
+          },
+          "premio": {
+            "type": "object",
+            "properties": {
+              "codigoPremio": {
+                "type": "integer",
+                "example": 50
+              },
+              "descricao": {
+                "type": "string",
+                "example": "Voucher R$50"
+              }
+            }
+          },
+          "status": {
+            "type": "string",
+            "example": "Aprovado"
+          }
+        }
+      },
+      "Venda": {
+        "type": "object",
+        "properties": {
+          "codigoVenda": {
+            "type": "integer",
+            "example": 9001
+          },
+          "dataVenda": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-05-08T15:45:00Z"
+          },
+          "valorTotal": {
+            "type": "number",
+            "format": "double",
+            "example": 299.90
+          },
+          "cliente": {
+            "$ref": "#/components/schemas/ClienteInfo"
+          },
+          "vendedor": {
+            "type": "object",
+            "properties": {
+              "codigoFuncionario": {
+                "type": "integer",
+                "example": 1
+              },
+              "nome": {
+                "type": "string",
+                "example": "Maria Santos"
+              }
+            }
+          },
+          "convenio": {
+            "type": "object",
+            "properties": {
+              "codigoConvenio": {
+                "type": "integer",
+                "example": 10
+              },
+              "nome": {
+                "type": "string",
+                "example": "Unimed"
+              }
+            }
+          },
+          "formaPagamento": {
+            "type": "object",
+            "properties": {
+              "codigo": {
+                "type": "integer",
+                "example": 1
+              },
+              "descricao": {
+                "type": "string",
+                "example": "Dinheiro"
+              }
+            }
+          },
+          "auditoria": {
+            "type": "object",
+            "properties": {
+              "dataLancamento": {
+                "type": "string",
+                "format": "date-time",
+                "example": "2026-05-08T15:50:00Z"
+              },
+              "codigoUsuario": {
+                "type": "integer",
+                "example": 5
+              },
+              "nomeUsuario": {
+                "type": "string",
+                "example": "admin"
+              },
+              "codigoEstacao": {
+                "type": "integer",
+                "example": 1
+              }
+            }
+          },
+          "produtos": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "codigoProduto": {
+                  "type": "integer",
+                  "example": 100
+                },
+                "nome": {
+                  "type": "string",
+                  "example": "Dipirona 500mg"
+                },
+                "quantidade": {
+                  "type": "number",
+                  "example": 2
+                },
+                "valorUnitario": {
+                  "type": "number",
+                  "format": "double",
+                  "example": 149.95
+                }
+              }
+            }
+          }
+        }
+      },
+      "ResgatesResponse": {
+        "type": "object",
+        "properties": {
+          "cliente": {
+            "$ref": "#/components/schemas/ClienteInfo"
+          },
+          "totalResgates": {
+            "type": "integer",
+            "example": 5
+          },
+          "totalPontosResgatados": {
+            "type": "integer",
+            "example": 2500
+          },
+          "resgates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Resgate"
+            }
+          }
+        }
+      },
+      "VendasResponse": {
+        "type": "object",
+        "properties": {
+          "cliente": {
+            "$ref": "#/components/schemas/ClienteInfo"
+          },
+          "dataPrimeiraCompra": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2023-01-15T08:00:00Z"
+          },
+          "dataultimaCompra": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-05-08T15:45:00Z"
+          },
+          "totalCompras": {
+            "type": "number",
+            "format": "double",
+            "example": 15890.50
+          },
+          "quantidadeVendas": {
+            "type": "integer",
+            "example": 42
+          },
+          "totalEmpresas": {
+            "type": "integer",
+            "example": 3
+          },
+          "totalFuncionarios": {
+            "type": "integer",
+            "example": 5
+          },
+          "vendas": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Venda"
+            }
+          }
+        }
+      }
+    },
+    "parameters": {
+      "IdentificadorParam": {
+        "name": "identificador",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        },
+        "description": "Identificador do cliente. Aceita: CodigoCliente (número), CodigoCadastro (número), CPFCNPJ (com ou sem máscara)",
+        "examples": {
+          "codigoCliente": {
+            "summary": "Por CodigoCliente",
+            "value": "123"
+          },
+          "cpfSemMascara": {
+            "summary": "Por CPF sem máscara",
+            "value": "12345678901"
+          },
+          "cpfComMascara": {
+            "summary": "Por CPF com máscara",
+            "value": "123.456.789-01"
+          },
+          "cnpjSemMascara": {
+            "summary": "Por CNPJ sem máscara",
+            "value": "12345678901234"
+          },
+          "cnpjComMascara": {
+            "summary": "Por CNPJ com máscara",
+            "value": "12.345.678/0001-34"
+          }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/fidelidade-resgate/cliente/{identificador}": {
+      "get": {
+        "tags": ["Fidelidade & Resgate"],
+        "summary": "Obter resgates de fidelidade do cliente",
+        "description": "Retorna todos os resgates de fidelidade de um cliente. Aceita múltiplas formas de identificação: CodigoCliente, CodigoCadastro ou CPFCNPJ (com ou sem máscara).",
+        "operationId": "obterResgatesCliente",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdentificadorParam"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 1
+            },
+            "description": "Número da página"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 50
+            },
+            "description": "Quantidade de registros por página"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Resgates obtidos com sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResgatesResponse"
+                },
+                "examples": {
+                  "success": {
+                    "summary": "Resposta bem-sucedida",
+                    "value": {
+                      "cliente": {
+                        "codigoCliente": 123,
+                        "codigoCadastro": 456,
+                        "nome": "João da Silva",
+                        "cpfCnpj": "123.456.789-00",
+                        "tipoPessoa": "Física",
+                        "ativo": true
+                      },
+                      "totalResgates": 3,
+                      "totalPontosResgatados": 1500,
+                      "resgates": [
+                        {
+                          "codigoResgate": 1001,
+                          "codigoCliente": 123,
+                          "dataResgate": "2026-05-05T14:30:00Z",
+                          "pontos": 500,
+                          "premio": {
+                            "codigoPremio": 50,
+                            "descricao": "Voucher R$50"
+                          },
+                          "status": "Aprovado"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Identificador inválido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                },
+                "example": {
+                  "erro": "Identificador inválido. Deve ser CodigoCliente, CPFCNPJ ou CodigoCadastro",
+                  "codigo": 400
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Cliente não encontrado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                },
+                "example": {
+                  "erro": "Cliente não encontrado",
+                  "codigo": 404
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Erro interno do servidor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                },
+                "example": {
+                  "erro": "Erro ao buscar resgates",
+                  "codigo": 500
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/vendas/cliente/{identificador}": {
+      "get": {
+        "tags": ["Vendas & Compras"],
+        "summary": "Obter histórico completo de compras do cliente",
+        "description": "Retorna todas as compras realizadas por um cliente com detalhes de vendedor, convênio, forma de pagamento e auditoria. Aceita múltiplas formas de identificação: CodigoCadastro, CodigoCliente ou CPFCNPJ (com ou sem máscara).",
+        "operationId": "obterVendasCliente",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdentificadorParam"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 1
+            },
+            "description": "Número da página"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 50
+            },
+            "description": "Quantidade de registros por página"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Compras obtidas com sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VendasResponse"
+                },
+                "examples": {
+                  "success": {
+                    "summary": "Resposta bem-sucedida",
+                    "value": {
+                      "cliente": {
+                        "codigoCliente": 123,
+                        "codigoCadastro": 456,
+                        "nome": "João da Silva",
+                        "cpfCnpj": "123.456.789-00",
+                        "tipoPessoa": "Física",
+                        "ativo": true
+                      },
+                      "dataPrimeiraCompra": "2023-01-15T08:00:00Z",
+                      "dataultimaCompra": "2026-05-08T15:45:00Z",
+                      "totalCompras": 15890.50,
+                      "quantidadeVendas": 42,
+                      "totalEmpresas": 3,
+                      "totalFuncionarios": 5,
+                      "vendas": [
+                        {
+                          "codigoVenda": 9001,
+                          "dataVenda": "2026-05-08T15:45:00Z",
+                          "valorTotal": 299.90,
+                          "cliente": {
+                            "codigoCliente": 123,
+                            "codigoCadastro": 456,
+                            "nome": "João da Silva",
+                            "cpfCnpj": "123.456.789-00",
+                            "tipoPessoa": "Física",
+                            "ativo": true
+                          },
+                          "vendedor": {
+                            "codigoFuncionario": 1,
+                            "nome": "Maria Santos"
+                          },
+                          "convenio": {
+                            "codigoConvenio": 10,
+                            "nome": "Unimed"
+                          },
+                          "formaPagamento": {
+                            "codigo": 1,
+                            "descricao": "Dinheiro"
+                          },
+                          "auditoria": {
+                            "dataLancamento": "2026-05-08T15:50:00Z",
+                            "codigoUsuario": 5,
+                            "nomeUsuario": "admin",
+                            "codigoEstacao": 1
+                          },
+                          "produtos": [
+                            {
+                              "codigoProduto": 100,
+                              "nome": "Dipirona 500mg",
+                              "quantidade": 2,
+                              "valorUnitario": 149.95
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Identificador inválido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                },
+                "example": {
+                  "erro": "Identificador inválido. Deve ser CodigoCadastro, CodigoCliente ou CPFCNPJ",
+                  "codigo": 400
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Cliente não encontrado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                },
+                "example": {
+                  "erro": "Cliente não encontrado",
+                  "codigo": 404
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Erro interno do servidor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Erro"
+                },
+                "example": {
+                  "erro": "Erro ao buscar vendas",
+                  "codigo": 500
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

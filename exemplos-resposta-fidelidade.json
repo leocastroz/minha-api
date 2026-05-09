@@ -1,0 +1,452 @@
+{
+  "exemplos_respostas": {
+    "sucesso_com_detalhes": {
+      "status": 200,
+      "descricao": "Cliente com resgates, prêmios, origem de pontos e vínculo comercial",
+      "resposta": {
+        "mensagem": "Resgates de fidelidade consultados com sucesso",
+        "cliente": {
+          "codigoCliente": 123,
+          "codigoCadastro": 456789,
+          "ativo": true
+        },
+        "resumo": {
+          "totalResgates": 3,
+          "totalPontosResgatados": 1250,
+          "totalPremios": 5,
+          "periodoAnalisado": {
+            "inicio": "2025-01-15T10:30:00Z",
+            "fim": "2026-05-08T14:45:00Z"
+          }
+        },
+        "resgates": [
+          {
+            "codigoResgate": 1001,
+            "codigoLancamento": 50001,
+            "dataLancamento": "2026-05-08T14:45:00Z",
+            "pontosResgate": 500,
+            "observacao": "Resgate de prêmios diversos",
+            "auditoria": {
+              "codigoUsuario": "USR_ADMIN_001",
+              "codigoEstacao": "EST_PDV_002"
+            },
+            "premios": [
+              {
+                "codigoPremio": 10,
+                "nomePremio": "Voucher R$ 50",
+                "pontos": 300,
+                "quantidade": 1,
+                "total": 300,
+                "premioAtivo": true
+              },
+              {
+                "codigoPremio": 20,
+                "nomePremio": "Brinde Especial",
+                "pontos": 200,
+                "quantidade": 2,
+                "total": 400,
+                "premioAtivo": true
+              }
+            ],
+            "origemPontos": [
+              {
+                "codigoFidelidade": 5,
+                "descricaoFidelidade": "Compras acumuladas",
+                "pontosUtilizados": 350,
+                "dataOrigem": "2025-06-10T00:00:00Z"
+              },
+              {
+                "codigoFidelidade": 8,
+                "descricaoFidelidade": "Programa referência",
+                "pontosUtilizados": 150,
+                "dataOrigem": "2025-08-22T00:00:00Z"
+              }
+            ],
+            "vinculoComercial": [
+              {
+                "codigoVenda": 9001,
+                "dataVenda": "2026-05-08T14:45:00Z",
+                "totalVenda": 1500.00,
+                "descricaoVenda": "Compra utilizando desconto em pontos"
+              }
+            ]
+          },
+          {
+            "codigoResgate": 1002,
+            "codigoLancamento": 50002,
+            "dataLancamento": "2026-04-15T09:30:00Z",
+            "pontosResgate": 400,
+            "observacao": null,
+            "auditoria": {
+              "codigoUsuario": "USR_VENDEDOR_002",
+              "codigoEstacao": "EST_PDV_001"
+            },
+            "premios": [
+              {
+                "codigoPremio": 15,
+                "nomePremio": "Cupom Desconto 20%",
+                "pontos": 400,
+                "quantidade": 1,
+                "total": 400,
+                "premioAtivo": true
+              }
+            ],
+            "origemPontos": [
+              {
+                "codigoFidelidade": 5,
+                "descricaoFidelidade": "Compras acumuladas",
+                "pontosUtilizados": 400,
+                "dataOrigem": "2025-03-01T00:00:00Z"
+              }
+            ],
+            "vinculoComercial": []
+          },
+          {
+            "codigoResgate": 1003,
+            "codigoLancamento": 50003,
+            "dataLancamento": "2026-03-20T16:00:00Z",
+            "pontosResgate": 350,
+            "observacao": "Resgate de boleto",
+            "auditoria": {
+              "codigoUsuario": "USR_ADMIN_001",
+              "codigoEstacao": "EST_PDV_003"
+            },
+            "premios": [
+              {
+                "codigoPremio": 25,
+                "nomePremio": "Vale Presente R$ 100",
+                "pontos": 350,
+                "quantidade": 1,
+                "total": 350,
+                "premioAtivo": true
+              }
+            ],
+            "origemPontos": [],
+            "vinculoComercial": [
+              {
+                "codigoVenda": 9002,
+                "dataVenda": "2026-03-20T16:00:00Z",
+                "totalVenda": 250.00,
+                "descricaoVenda": "Boleto com desconto de pontos"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "sucesso_sem_detalhes": {
+      "status": 200,
+      "descricao": "Cliente com resgates, prêmios (SEM origem e vínculo)",
+      "resposta": {
+        "mensagem": "Resgates de fidelidade consultados com sucesso",
+        "cliente": {
+          "codigoCliente": 123,
+          "codigoCadastro": 456789,
+          "ativo": true
+        },
+        "resumo": {
+          "totalResgates": 1,
+          "totalPontosResgatados": 500,
+          "totalPremios": 2,
+          "periodoAnalisado": {
+            "inicio": "2026-05-08T14:45:00Z",
+            "fim": "2026-05-08T14:45:00Z"
+          }
+        },
+        "resgates": [
+          {
+            "codigoResgate": 1001,
+            "codigoLancamento": 50001,
+            "dataLancamento": "2026-05-08T14:45:00Z",
+            "pontosResgate": 500,
+            "observacao": "Resgate de prêmios diversos",
+            "auditoria": {
+              "codigoUsuario": "USR_ADMIN_001",
+              "codigoEstacao": "EST_PDV_002"
+            },
+            "premios": [
+              {
+                "codigoPremio": 10,
+                "nomePremio": "Voucher R$ 50",
+                "pontos": 300,
+                "quantidade": 1,
+                "total": 300,
+                "premioAtivo": true
+              },
+              {
+                "codigoPremio": 20,
+                "nomePremio": "Brinde Especial",
+                "pontos": 200,
+                "quantidade": 2,
+                "total": 400,
+                "premioAtivo": true
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "sucesso_sem_resgates": {
+      "status": 200,
+      "descricao": "Cliente encontrado mas sem resgates",
+      "resposta": {
+        "mensagem": "Nenhum resgate de fidelidade encontrado",
+        "codigoCliente": 123,
+        "codigoCadastro": 456789,
+        "totalResgates": 0,
+        "resgates": []
+      }
+    },
+    "erro_parametro_invalido": {
+      "status": 400,
+      "descricao": "CodigoCliente não é um número",
+      "resposta": {
+        "erro": "CodigoCliente inválido",
+        "mensagem": "CodigoCliente deve ser um número válido"
+      }
+    },
+    "erro_cliente_nao_encontrado": {
+      "status": 404,
+      "descricao": "Nenhum cliente com esse ID",
+      "resposta": {
+        "erro": "Cliente não encontrado",
+        "codigoCliente": 999999
+      }
+    },
+    "erro_servidor": {
+      "status": 500,
+      "descricao": "Erro ao consultar banco de dados",
+      "resposta": {
+        "erro": "Erro ao consultar resgates de fidelidade",
+        "mensagem": "Descrição técnica do erro do SQL Server"
+      }
+    }
+  },
+  "campos_resposta": {
+    "cliente": {
+      "codigoCliente": {
+        "tipo": "integer",
+        "descricao": "ID do cliente",
+        "obrigatorio": true
+      },
+      "codigoCadastro": {
+        "tipo": "integer",
+        "descricao": "ID do cadastro vinculado ao cliente",
+        "obrigatorio": true
+      },
+      "ativo": {
+        "tipo": "boolean",
+        "descricao": "Status do cliente",
+        "obrigatorio": true
+      }
+    },
+    "resumo": {
+      "totalResgates": {
+        "tipo": "integer",
+        "descricao": "Quantidade de resgates realizados",
+        "obrigatorio": true
+      },
+      "totalPontosResgatados": {
+        "tipo": "integer",
+        "descricao": "Soma de todos os pontos utilizados",
+        "obrigatorio": true
+      },
+      "totalPremios": {
+        "tipo": "integer",
+        "descricao": "Quantidade total de prêmios resgatados",
+        "obrigatorio": true
+      },
+      "periodoAnalisado": {
+        "tipo": "object",
+        "descricao": "Datas do primeiro e último resgate",
+        "campos": {
+          "inicio": {
+            "tipo": "string (ISO 8601)",
+            "descricao": "Data do primeiro resgate",
+            "pode_ser_nulo": true
+          },
+          "fim": {
+            "tipo": "string (ISO 8601)",
+            "descricao": "Data do último resgate",
+            "pode_ser_nulo": true
+          }
+        }
+      }
+    },
+    "resgate": {
+      "codigoResgate": {
+        "tipo": "integer",
+        "descricao": "ID único do resgate",
+        "obrigatorio": true
+      },
+      "codigoLancamento": {
+        "tipo": "integer",
+        "descricao": "ID do lançamento (âncora operacional)",
+        "obrigatorio": false,
+        "pode_ser_nulo": true
+      },
+      "dataLancamento": {
+        "tipo": "string (ISO 8601)",
+        "descricao": "Data/hora do resgate",
+        "obrigatorio": false,
+        "pode_ser_nulo": true
+      },
+      "pontosResgate": {
+        "tipo": "integer",
+        "descricao": "Total de pontos utilizados neste resgate",
+        "obrigatorio": true
+      },
+      "observacao": {
+        "tipo": "string",
+        "descricao": "Campo livre para notas",
+        "obrigatorio": false,
+        "pode_ser_nulo": true
+      },
+      "auditoria": {
+        "tipo": "object",
+        "descricao": "Informações de auditoria do lançamento",
+        "obrigatorio": true,
+        "campos": {
+          "codigoUsuario": {
+            "tipo": "string",
+            "descricao": "Usuário que realizou o resgate",
+            "pode_ser_nulo": true
+          },
+          "codigoEstacao": {
+            "tipo": "string",
+            "descricao": "Terminal/PDV onde foi realizado",
+            "pode_ser_nulo": true
+          }
+        }
+      },
+      "premios": {
+        "tipo": "array of object",
+        "descricao": "Lista de prêmios resgatados neste resgate",
+        "obrigatorio": true,
+        "campos": {
+          "codigoPremio": {
+            "tipo": "integer",
+            "descricao": "ID do prêmio"
+          },
+          "nomePremio": {
+            "tipo": "string",
+            "descricao": "Nome descritivo do prêmio"
+          },
+          "pontos": {
+            "tipo": "integer",
+            "descricao": "Custo em pontos (valor histórico)"
+          },
+          "quantidade": {
+            "tipo": "integer",
+            "descricao": "Unidades resgatadas"
+          },
+          "total": {
+            "tipo": "integer",
+            "descricao": "Pontos × Quantidade"
+          },
+          "premioAtivo": {
+            "tipo": "boolean",
+            "descricao": "Status do prêmio no catálogo"
+          }
+        }
+      },
+      "origemPontos": {
+        "tipo": "array of object",
+        "descricao": "Origem dos pontos (CondicionalIncluir Detalhes=true)",
+        "obrigatorio": false,
+        "pode_ser_nulo": true,
+        "campos": {
+          "codigoFidelidade": {
+            "tipo": "integer",
+            "descricao": "ID da regra de fidelidade"
+          },
+          "descricaoFidelidade": {
+            "tipo": "string",
+            "descricao": "Descrição da origem"
+          },
+          "pontosUtilizados": {
+            "tipo": "integer",
+            "descricao": "Pontos desta origem que foram gastos"
+          },
+          "dataOrigem": {
+            "tipo": "string (ISO 8601)",
+            "descricao": "Quando os pontos foram creditados"
+          }
+        }
+      },
+      "vinculoComercial": {
+        "tipo": "array of object",
+        "descricao": "Vendas relacionadas (Condicional: Incluir Detalhes=true)",
+        "obrigatorio": false,
+        "pode_ser_nulo": true,
+        "campos": {
+          "codigoVenda": {
+            "tipo": "integer",
+            "descricao": "ID da venda"
+          },
+          "dataVenda": {
+            "tipo": "string (ISO 8601)",
+            "descricao": "Data da compra"
+          },
+          "totalVenda": {
+            "tipo": "number",
+            "descricao": "Valor da transação"
+          },
+          "descricaoVenda": {
+            "tipo": "string",
+            "descricao": "Descrição da venda"
+          }
+        }
+      }
+    }
+  },
+  "tipos_dados": {
+    "CodigoCadastro": {
+      "tipo": "integer",
+      "tamanho": 4,
+      "minimo": 1,
+      "maximo": 2147483647,
+      "exemplo": 123456
+    },
+    "CodigoCliente": {
+      "tipo": "integer",
+      "tamanho": 4,
+      "minimo": 1,
+      "maximo": 2147483647,
+      "exemplo": 789
+    },
+    "CodigoResgate": {
+      "tipo": "bigint",
+      "tamanho": 8,
+      "minimo": 1,
+      "maximo": 9223372036854775807,
+      "exemplo": 10001
+    },
+    "Pontos": {
+      "tipo": "integer ou numeric",
+      "tamanho": 4,
+      "minimo": 0,
+      "maximo": 2147483647,
+      "exemplo": 500
+    },
+    "DataLancamento": {
+      "tipo": "datetime2",
+      "formato": "ISO 8601",
+      "exemplo": "2026-05-08T14:45:00Z"
+    },
+    "Quantidade": {
+      "tipo": "integer",
+      "tamanho": 4,
+      "minimo": 0,
+      "maximo": 2147483647,
+      "exemplo": 2
+    },
+    "Total": {
+      "tipo": "numeric(18,2)",
+      "tamanho": variavel,
+      "minimo": "0.00",
+      "maximo": "999999999999999.99",
+      "exemplo": 1500.00
+    }
+  }
+}

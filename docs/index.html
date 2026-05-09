@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Docs - Fidelidade & Vendas</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@3/swagger-ui.css">
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: #fafafa;
+        }
+        .topbar {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .topbar h1 {
+            margin: 0;
+            font-size: 24px;
+            font-weight: 600;
+        }
+        .topbar p {
+            margin: 5px 0 0 0;
+            font-size: 14px;
+            opacity: 0.9;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        .info-box {
+            background: white;
+            margin: 20px;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            border-left: 4px solid #667eea;
+        }
+        .info-box h2 {
+            margin-top: 0;
+            color: #333;
+        }
+        .info-box code {
+            background: #f5f5f5;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 12px;
+        }
+        .tags-container {
+            display: flex;
+            gap: 10px;
+            margin: 10px 0;
+            flex-wrap: wrap;
+        }
+        .tag {
+            background: #e8eaf6;
+            color: #667eea;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <div class="topbar">
+        <div class="container">
+            <h1>🔐 API - Fidelidade & Vendas</h1>
+            <p>Documentação Interativa das APIs com Suporte a Múltiplos Identificadores</p>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="info-box">
+            <h2>✨ Recursos Principais</h2>
+            <ul>
+                <li><strong>Busca por múltiplos identificadores:</strong> CodigoCliente, CodigoCadastro ou CPFCNPJ (com/sem máscara)</li>
+                <li><strong>Dados enriquecidos:</strong> Vendedor, Convênio, Forma de Pagamento, Auditoria Completa</li>
+                <li><strong>Resgates de fidelidade:</strong> Histórico completo com pontos e prêmios</li>
+                <li><strong>Histórico de compras:</strong> Análise detalhada de vendas por cliente</li>
+            </ul>
+        </div>
+
+        <div class="info-box">
+            <h2>🚀 Como Usar</h2>
+            <p>
+                <strong>Buscar cliente por CPF (com máscara):</strong><br>
+                <code>GET /fidelidade-resgate/cliente/123.456.789-00</code>
+            </p>
+            <p>
+                <strong>Buscar cliente por CNPJ (sem máscara):</strong><br>
+                <code>GET /vendas/cliente/12345678901234</code>
+            </p>
+            <p>
+                <strong>Buscar cliente por CodigoCliente:</strong><br>
+                <code>GET /vendas/cliente/123</code>
+            </p>
+        </div>
+
+        <div class="info-box">
+            <h2>📚 Endpoints Disponíveis</h2>
+            <div class="tags-container">
+                <span class="tag">🎁 GET /fidelidade-resgate/cliente/{identificador}</span>
+                <span class="tag">🛍️ GET /vendas/cliente/{identificador}</span>
+            </div>
+        </div>
+    </div>
+
+    <div id="swagger-ui"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@3/swagger-ui-bundle.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@3/swagger-ui-standalone-preset.js"></script>
+    <script>
+        const ui = SwaggerUIBundle({
+            url: "./swagger-apis.json",
+            dom_id: '#swagger-ui',
+            presets: [
+                SwaggerUIBundle.presets.apis,
+                SwaggerUIStandalonePreset
+            ],
+            layout: "BaseLayout",
+            deepLinking: true,
+            defaultModelsExpandDepth: 1,
+            defaultModelExpandDepth: 1,
+            showRequestHeaders: true,
+            filter: true,
+            onComplete: function() {
+                console.log('✅ Swagger UI carregado com sucesso!');
+            }
+        });
+
+        window.onload = function() {
+            console.log('🎉 API Documentation Loaded!');
+        };
+    </script>
+</body>
+</html>
