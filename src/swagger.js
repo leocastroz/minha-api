@@ -127,6 +127,14 @@ const swaggerSpec = {
           ativo: { type: 'boolean', example: true },
         },
       },
+      FidelidadePremioUpdateRequest: {
+        type: 'object',
+        properties: {
+          nomePremio: { type: 'string', example: 'Desconto na próxima compra' },
+          pontos: { type: 'integer', example: 1000 },
+          ativo: { type: 'boolean', example: true },
+        },
+      },
       FidelidadePremioListResponse: {
         type: 'object',
         properties: {
@@ -927,6 +935,53 @@ const swaggerSpec = {
               },
             },
           },
+        },
+      },
+    },
+    '/fidelidade-premio/{codigo}': {
+      put: {
+        tags: ['Fidelidade Premio'],
+        summary: 'Atualiza um prêmio por CodigoPremio',
+        parameters: [
+          { name: 'codigo', in: 'path', required: true, schema: { type: 'integer' } },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/FidelidadePremioUpdateRequest' },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: 'Prêmio atualizado',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    mensagem: { type: 'string' },
+                    premio: { $ref: '#/components/schemas/FidelidadePremioItem' },
+                  },
+                },
+              },
+            },
+          },
+          400: { description: 'Payload inválido', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          404: { description: 'Prêmio não encontrado', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+        },
+      },
+      delete: {
+        tags: ['Fidelidade Premio'],
+        summary: 'Remove um prêmio por CodigoPremio (soft-delete por padrão)',
+        parameters: [
+          { name: 'codigo', in: 'path', required: true, schema: { type: 'integer' } },
+          { name: 'force', in: 'query', required: false, schema: { type: 'boolean' }, description: 'Se true, realiza exclusão física' },
+        ],
+        responses: {
+          200: { description: 'Prêmio removido', content: { 'application/json': { schema: { type: 'object', additionalProperties: true } } } },
+          404: { description: 'Prêmio não encontrado', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
         },
       },
     },

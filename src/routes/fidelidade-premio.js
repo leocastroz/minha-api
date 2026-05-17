@@ -102,4 +102,106 @@ router.post('/', async (req, res) => {
   }
 });
 
+/**
+ * PUT /fidelidade-premio/:codigo
+ * Atualiza um prêmio existente (parcialmente suportado)
+ * Body: { nomePremio?: string, pontos?: number, ativo?: boolean }
+ */
+router.put('/:codigo', async (req, res) => {
+  try {
+    const codigo = parseInt(req.params.codigo, 10);
+    if (isNaN(codigo)) {
+      return res.status(400).json({ erro: 'CodigoPremio inválido', mensagem: 'O parâmetro codigo deve ser um número' });
+    }
+
+    const { nomePremio, pontos, ativo } = req.body || {};
+    if (nomePremio === undefined && pontos === undefined && ativo === undefined) {
+      return res.status(400).json({ erro: 'Nenhum campo para atualizar', mensagem: 'Forneça ao menos um dos campos: nomePremio, pontos, ativo' });
+    }
+
+    const pool = await connectDB();
+    const pontosNum = pontos !== undefined ? Number(pontos) : null;
+    const ativoVal = ativo === undefined ? null : (ativo === true || ativo === 'true' ? 1 : 0);
+
+    const updateQuery = await pool.request()
+      .input('codigo', codigo)
+      .input('nomePremio', nomePremio !== undefined ? String(nomePremio).trim() : null)
+      .input('pontos', pontosNum)
+      .input('ativo', ativoVal)
+      .query(`
+        UPDATE INOVAFARMA_DPOPPARA.dbo.Fidelidade_Premio
+        SET
+          NomePremio = COALESCE(NULLIF(@nomePremio, ''), NomePremio),
+          Pontos = COALESCE(@pontos, Pontos),
+          Ativo = COALESCE(@ativo, Ativo)
+        OUTPUT INSERTED.CodigoPremio, INSERTED.NomePremio, INSERTED.Pontos, INSERTED.Ativo
+        WHERE CodigoPremio = @codigo
+      `);
+
+    const updated = (updateQuery.recordset && updateQuery.recordset[0]) || null;
+    if (!updated) {
+      return res.status(404).json({ erro: 'Prêmio não encontrado', mensagem: 'CodigoPremio não existe' });
+    }
+
+    return res.json({
+      mensagem: 'Prêmio atualizado com sucesso',
+      premio: {
+        codigoPremio: updated.CodigoPremio,
+        nomePremio: updated.NomePremio,
+        pontos: Number(updated.Pontos) || 0,
+        ativo: updated.Ativo === true || updated.Ativo === 1,
+      },
+    });
+  } catch (error) {
+    console.error('[ERRO] PUT /fidelidade-premio/:codigo', error.message);
+    return res.status(500).json({ erro: 'Erro ao atualizar prêmio de fidelidade', mensagem: error.message });
+  }
+});
+
+/**
+ * DELETE /fidelidade-premio/:codigo
+ * Soft-delete por padrão (Ativo = 0). Use ?force=true para exclusão física.
+ */
+router.delete('/:codigo', async (req, res) => {
+  try {
+    const codigo = parseInt(req.params.codigo, 10);
+    if (isNaN(codigo)) {
+      return res.status(400).json({ erro: 'CodigoPremio inválido', mensagem: 'O parâmetro codigo deve ser um número' });
+    }
+
+    const { force } = req.query;
+    const pool = await connectDB();
+
+    if (force === 'true') {
+      const del = await pool.request()
+        .input('codigo', codigo)
+        .query(`
+          DELETE FROM INOVAFARMA_DPOPPARA.dbo.Fidelidade_Premio
+          OUTPUT DELETED.CodigoPremio
+          WHERE CodigoPremio = @codigo
+        `);
+
+      const removed = del.recordset && del.recordset[0];
+      if (!removed) return res.status(404).json({ erro: 'Prêmio não encontrado', mensagem: 'CodigoPremio não existe' });
+      return res.json({ mensagem: 'Prêmio removido fisicamente', codigoPremio: removed.CodigoPremio });
+    }
+
+    const soft = await pool.request()
+      .input('codigo', codigo)
+      .query(`
+        UPDATE INOVAFARMA_DPOPPARA.dbo.Fidelidade_Premio
+        SET Ativo = 0
+        OUTPUT INSERTED.CodigoPremio, INSERTED.NomePremio, INSERTED.Pontos, INSERTED.Ativo
+        WHERE CodigoPremio = @codigo
+      `);
+
+    const removed = soft.recordset && soft.recordset[0];
+    if (!removed) return res.status(404).json({ erro: 'Prêmio não encontrado', mensagem: 'CodigoPremio não existe' });
+    return res.json({ mensagem: 'Prêmio desativado (soft-delete) com sucesso', premio: { codigoPremio: removed.CodigoPremio } });
+  } catch (error) {
+    console.error('[ERRO] DELETE /fidelidade-premio/:codigo', error.message);
+    return res.status(500).json({ erro: 'Erro ao deletar prêmio de fidelidade', mensagem: error.message });
+  }
+});
+
 module.exports = router;
