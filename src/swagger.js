@@ -118,6 +118,15 @@ const swaggerSpec = {
           ativo: { type: 'boolean', example: true },
         },
       },
+      FidelidadePremioCreateRequest: {
+        type: 'object',
+        required: ['nomePremio'],
+        properties: {
+          nomePremio: { type: 'string', example: 'Desconto na próxima compra' },
+          pontos: { type: 'integer', example: 1000 },
+          ativo: { type: 'boolean', example: true },
+        },
+      },
       FidelidadePremioListResponse: {
         type: 'object',
         properties: {
@@ -871,6 +880,50 @@ const swaggerSpec = {
             content: {
               'application/json': {
                 schema: { $ref: '#/components/schemas/FidelidadePremioListResponse' },
+              },
+            },
+          },
+        },
+      },
+      post: {
+        tags: ['Fidelidade Premio'],
+        summary: 'Cria um novo prêmio de fidelidade',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/FidelidadePremioCreateRequest' },
+            },
+          },
+        },
+        responses: {
+          201: {
+            description: 'Prêmio criado',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    mensagem: { type: 'string' },
+                    premio: { $ref: '#/components/schemas/FidelidadePremioItem' },
+                  },
+                },
+              },
+            },
+          },
+          400: {
+            description: 'Payload inválido',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+              },
+            },
+          },
+          500: {
+            description: 'Erro interno',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
               },
             },
           },
