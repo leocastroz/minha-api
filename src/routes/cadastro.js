@@ -134,9 +134,10 @@ function parseBooleanLike(value, fallback = true) {
 }
 
 
-// GET /cadastro?page=1&limit=20&nome=FRANCISCA
+// GET /cadastro?page=1&limit=20&nome=FRANCISCA&CPFCNPJ=12345678900
 router.get('/', async (req, res) => {
-  const { page = 1, limit = 50, nome } = req.query;
+  const { page = 1, limit = 50, nome, CPFCNPJ, cpfcnpj } = req.query;
+  const cpfCnpjFiltro = String(CPFCNPJ ?? cpfcnpj ?? '').trim();
   const pageNumber = Number(page);
   const limitNumber = Number(limit);
   const startRow = (pageNumber - 1) * limitNumber + 1;
@@ -150,11 +151,21 @@ router.get('/', async (req, res) => {
       .input('endRow', endRow);
 
     // Monta o WHERE dinamicamente
-    let where = '';
+    const filtros = [];
+
     if (nome) {
       request.input('nome', `%${nome}%`);
-      where = `WHERE LTRIM(RTRIM(cad.Nome)) LIKE LTRIM(RTRIM(@nome))`;
+      filtros.push('LTRIM(RTRIM(cad.Nome)) LIKE LTRIM(RTRIM(@nome))');
     }
+
+    if (cpfCnpjFiltro) {
+      request.input('cpfCnpj', cpfCnpjFiltro);
+      filtros.push('LTRIM(RTRIM(cad.CPFCNPJ)) = LTRIM(RTRIM(@cpfCnpj))');
+    }
+
+    const where = filtros.length > 0
+      ? `WHERE ${filtros.join(' AND ')}`
+      : '';
 
     const result = await request.query(`
       ;WITH CadastroPaginado AS (
