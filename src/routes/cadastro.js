@@ -537,6 +537,106 @@ router.post('/', async (req, res) => {
   }
 });
 
+// GET /cadastro/duplicados — lista todos os CPF/CNPJ com duplicidade
+router.get('/duplicados', async (req, res) => {
+  const { page = 1, limit = 50 } = req.query;
+  const pageNumber = Number(page);
+  const limitNumber = Number(limit);
+  const startRow = (pageNumber - 1) * limitNumber + 1;
+  const endRow = pageNumber * limitNumber;
+
+  try {
+    const pool = await connectDB();
+
+    // Primeiro busca o total de grupos duplicados
+    const totalResult = await pool.request().query(`
+      SELECT COUNT(*) AS total
+      FROM (
+        SELECT LTRIM(RTRIM(CPFCNPJ)) AS CPFCNPJ
+        FROM INOVAFARMA_DPOPPARA.dbo.Cadastro
+        WHERE LTRIM(RTRIM(ISNULL(CPFCNPJ, ''))) <> ''
+        GROUP BY LTRIM(RTRIM(CPFCNPJ))
+        HAVING COUNT(*) > 1
+      ) AS duplicados
+    `);
+
+    const totalGrupos = totalResult.recordset[0].total;
+
+    // Busca os detalhes paginados por grupo de CPF/CNPJ duplicado
+    const result = await pool.request()
+      .input('startRow', startRow)
+      .input('endRow', endRow)
+      .query(`
+        ;WITH CpfsDuplicados AS (
+          SELECT
+            LTRIM(RTRIM(CPFCNPJ)) AS CPFCNPJ,
+            COUNT(*) AS quantidade,
+            ROW_NUMBER() OVER (ORDER BY COUNT(*) DESC, LTRIM(RTRIM(CPFCNPJ))) AS RowNum
+          FROM INOVAFARMA_DPOPPARA.dbo.Cadastro
+          WHERE LTRIM(RTRIM(ISNULL(CPFCNPJ, ''))) <> ''
+          GROUP BY LTRIM(RTRIM(CPFCNPJ))
+          HAVING COUNT(*) > 1
+        ),
+        CpfsPaginados AS (
+          SELECT * FROM CpfsDuplicados
+          WHERE RowNum BETWEEN @startRow AND @endRow
+        )
+        SELECT
+          cad.CodigoCadastro,
+          cad.CodigoEmpresa,
+          cad.CodigoLancamento,
+          LTRIM(RTRIM(cad.Nome)) AS Nome,
+          LTRIM(RTRIM(cad.SobreNome)) AS SobreNome,
+          LTRIM(RTRIM(cad.CPFCNPJ)) AS CPFCNPJ,
+          cad.DataNascimento,
+          cad.DataCadastro,
+          cad.Eliminado,
+          cli.CodigoCliente,
+          dup.quantidade AS TotalDuplicados
+        FROM CpfsPaginados dup
+        JOIN INOVAFARMA_DPOPPARA.dbo.Cadastro cad
+          ON LTRIM(RTRIM(cad.CPFCNPJ)) = dup.CPFCNPJ
+        LEFT JOIN INOVAFARMA_DPOPPARA.dbo.Cliente cli
+          ON cli.CodigoCadastro = cad.CodigoCadastro
+        ORDER BY dup.quantidade DESC, dup.CPFCNPJ, cad.CodigoCadastro
+      `);
+
+    // Agrupa os resultados por CPFCNPJ para facilitar a visualização
+    const grupos = {};
+    for (const linha of result.recordset) {
+      const cpf = linha.CPFCNPJ;
+      if (!grupos[cpf]) {
+        grupos[cpf] = {
+          CPFCNPJ: cpf,
+          quantidade: linha.TotalDuplicados,
+          cadastros: [],
+        };
+      }
+      grupos[cpf].cadastros.push({
+        CodigoCadastro: linha.CodigoCadastro,
+        CodigoEmpresa: linha.CodigoEmpresa,
+        CodigoLancamento: linha.CodigoLancamento,
+        Nome: linha.Nome,
+        SobreNome: linha.SobreNome,
+        DataNascimento: linha.DataNascimento,
+        DataCadastro: linha.DataCadastro,
+        Eliminado: linha.Eliminado,
+        CodigoCliente: linha.CodigoCliente,
+      });
+    }
+
+    return res.json({
+      pagina: pageNumber,
+      limite: limitNumber,
+      totalGruposDuplicados: totalGrupos,
+      totalNestaPagina: Object.keys(grupos).length,
+      duplicados: Object.values(grupos),
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /cadastro/:codigo — buscar usuário por CodigoCadastro
 router.get('/:codigo', async (req, res) => {
   const codigo = Number(req.params.codigo);
@@ -641,6 +741,89 @@ router.patch('/:codigo', async (req, res) => {
     return res.json({
       mensagem: 'Cadastro atualizado com PATCH.',
       dados: result.recordset[0],
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /cadastro/:codigo — deletar cadastro pelo CodigoCadastro
+router.delete('/:codigo', async (req, res) => {
+  const codigo = Number(req.params.codigo);
+
+  if (Number.isNaN(codigo)) {
+    return res.status(400).json({ error: 'CodigoCadastro inválido.' });
+  }
+
+  try {
+    const pool = await connectDB();
+
+    // Verifica se o cadastro existe antes de deletar
+    const check = await pool.request()
+      .input('codigo', codigo)
+      .query(`
+        SELECT
+          cad.CodigoCadastro,
+          LTRIM(RTRIM(cad.Nome)) AS Nome,
+          LTRIM(RTRIM(cad.CPFCNPJ)) AS CPFCNPJ,
+          cli.CodigoCliente
+        FROM INOVAFARMA_DPOPPARA.dbo.Cadastro cad
+        LEFT JOIN INOVAFARMA_DPOPPARA.dbo.Cliente cli
+          ON cli.CodigoCadastro = cad.CodigoCadastro
+        WHERE cad.CodigoCadastro = @codigo
+      `);
+
+    if (check.recordset.length === 0) {
+      return res.status(404).json({ error: 'Cadastro não encontrado.' });
+    }
+
+    const cadastroParaDeletar = check.recordset[0];
+
+    // Deleção em cascata dentro de uma transaction respeitando as FKs:
+    // 1. Cliente_Convenio  →  2. Cliente  →  3. Cadastro
+    const transaction = new sql.Transaction(pool);
+    await transaction.begin();
+
+    try {
+      // 1. Remove vínculos de convênio do cliente (se existir)
+      if (cadastroParaDeletar.CodigoCliente != null) {
+        await new sql.Request(transaction)
+          .input('codigoCliente', cadastroParaDeletar.CodigoCliente)
+          .query(`
+            DELETE FROM INOVAFARMA_DPOPPARA.dbo.Cliente_Convenio
+            WHERE CodigoCliente = @codigoCliente
+          `);
+
+        // 2. Remove o registro de Cliente
+        await new sql.Request(transaction)
+          .input('codigoCliente', cadastroParaDeletar.CodigoCliente)
+          .query(`
+            DELETE FROM INOVAFARMA_DPOPPARA.dbo.Cliente
+            WHERE CodigoCliente = @codigoCliente
+          `);
+      }
+
+      // 3. Remove o Cadastro
+      await new sql.Request(transaction)
+        .input('codigo', codigo)
+        .query(`
+          DELETE FROM INOVAFARMA_DPOPPARA.dbo.Cadastro
+          WHERE CodigoCadastro = @codigo
+        `);
+
+      await transaction.commit();
+    } catch (errTx) {
+      await transaction.rollback();
+      throw errTx;
+    }
+
+    return res.json({
+      mensagem: 'Cadastro deletado com sucesso.',
+      cadastroDeletado: cadastroParaDeletar,
+      dependenciasRemovidas: {
+        cliente: cadastroParaDeletar.CodigoCliente != null ? 'SIM' : 'NAO',
+        clienteConvenio: cadastroParaDeletar.CodigoCliente != null ? 'SIM' : 'NAO',
+      },
     });
   } catch (err) {
     return res.status(500).json({ error: err.message });

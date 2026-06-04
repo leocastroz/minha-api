@@ -662,6 +662,70 @@ const swaggerSpec = {
         },
       },
     },
+    '/cadastro/duplicados': {
+      get: {
+        tags: ['Cadastro'],
+        summary: 'Lista cadastros com CPF/CNPJ duplicado',
+        description: 'Retorna todos os grupos de cadastros que possuem o mesmo CPFCNPJ, agrupados por CPF/CNPJ. Útil para identificar e tratar duplicidades antes de deletar registros.',
+        parameters: [
+          { name: 'page', in: 'query', schema: { type: 'integer', default: 1 }, description: 'Página dos grupos duplicados' },
+          { name: 'limit', in: 'query', schema: { type: 'integer', default: 50 }, description: 'Quantidade de grupos por página' },
+        ],
+        responses: {
+          200: {
+            description: 'Grupos de cadastros duplicados',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    pagina: { type: 'integer', example: 1 },
+                    limite: { type: 'integer', example: 50 },
+                    totalGruposDuplicados: { type: 'integer', example: 12 },
+                    totalNestaPagina: { type: 'integer', example: 12 },
+                    duplicados: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          CPFCNPJ: { type: 'string', example: '12345678900' },
+                          quantidade: { type: 'integer', example: 2 },
+                          cadastros: {
+                            type: 'array',
+                            items: {
+                              type: 'object',
+                              properties: {
+                                CodigoCadastro: { type: 'integer', example: 100 },
+                                CodigoEmpresa: { type: 'integer', example: 1 },
+                                CodigoLancamento: { type: 'string', example: '101' },
+                                Nome: { type: 'string', example: 'JOÃO SILVA' },
+                                SobreNome: { type: 'string', nullable: true, example: 'SILVA' },
+                                DataNascimento: { type: 'string', format: 'date-time', nullable: true },
+                                DataCadastro: { type: 'string', format: 'date-time', nullable: true },
+                                Eliminado: { type: 'boolean', example: false },
+                                CodigoCliente: { type: 'integer', nullable: true, example: 55 },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          500: {
+            description: 'Erro interno',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+              },
+            },
+          },
+        },
+      },
+    },
     '/cadastro/com-convenio': {
       get: {
         tags: ['Cadastro'],
@@ -792,6 +856,83 @@ const swaggerSpec = {
                     dados: { type: 'object', additionalProperties: true },
                   },
                 },
+              },
+            },
+          },
+        },
+      },
+      delete: {
+        tags: ['Cadastro'],
+        summary: 'Deleta um cadastro pelo CodigoCadastro',
+        description: 'Remove permanentemente um cadastro. Se o cadastro possuir vínculo ativo na tabela Cliente, a deleção é bloqueada (409). Nesse caso, utilize PATCH com `Eliminado: true` para inativar o registro.',
+        parameters: [
+          {
+            name: 'codigo',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer' },
+            description: 'CodigoCadastro do registro a ser deletado',
+          },
+        ],
+        responses: {
+          200: {
+            description: 'Cadastro deletado com sucesso',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    mensagem: { type: 'string', example: 'Cadastro deletado com sucesso.' },
+                    cadastroDeletado: {
+                      type: 'object',
+                      properties: {
+                        CodigoCadastro: { type: 'integer', example: 200 },
+                        Nome: { type: 'string', example: 'JOÃO SILVA' },
+                        CPFCNPJ: { type: 'string', example: '12345678900' },
+                        CodigoCliente: { type: 'integer', nullable: true, example: null },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          400: {
+            description: 'CodigoCadastro inválido',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+              },
+            },
+          },
+          404: {
+            description: 'Cadastro não encontrado',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
+              },
+            },
+          },
+          409: {
+            description: 'Cadastro possui vínculo em Cliente — deleção bloqueada',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    error: { type: 'string', example: 'Este cadastro possui vínculo ativo na tabela Cliente e não pode ser deletado diretamente.' },
+                    dica: { type: 'string', example: 'Para remover um duplicado vinculado a um cliente, utilize o campo Eliminado=true via PATCH para inativá-lo, ou remova o vínculo de Cliente antes de deletar.' },
+                    cadastro: { type: 'object', additionalProperties: true },
+                  },
+                },
+              },
+            },
+          },
+          500: {
+            description: 'Erro interno',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorResponse' },
               },
             },
           },
