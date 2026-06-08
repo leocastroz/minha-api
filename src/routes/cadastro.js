@@ -538,70 +538,133 @@ router.post('/', async (req, res) => {
 });
 
 // GET /cadastro/duplicados — lista todos os CPF/CNPJ com duplicidade
+// Query params:
+//   page, limit          — paginação
+//   comPontosValidos     — "true" para retornar somente grupos que têm ao menos 1 cadastro com saldo de pontos > 0
+//   dataInicio           — filtro de DataCadastro (formato YYYY-MM-DD), ex: 2024-12-05
+//   dataFim              — filtro de DataCadastro (formato YYYY-MM-DD), ex: 2025-12-05
 router.get('/duplicados', async (req, res) => {
-  const { page = 1, limit = 50 } = req.query;
+  const {
+    page = 1,
+    limit = 50,
+    comPontosValidos,
+    dataInicio,
+    dataFim,
+  } = req.query;
+
   const pageNumber = Number(page);
   const limitNumber = Number(limit);
   const startRow = (pageNumber - 1) * limitNumber + 1;
   const endRow = pageNumber * limitNumber;
 
+  // Valida datas quando fornecidas
+  const reData = /^\d{4}-\d{2}-\d{2}$/;
+  if (dataInicio && !reData.test(dataInicio)) {
+    return res.status(400).json({ error: 'dataInicio deve estar no formato YYYY-MM-DD.' });
+  }
+  if (dataFim && !reData.test(dataFim)) {
+    return res.status(400).json({ error: 'dataFim deve estar no formato YYYY-MM-DD.' });
+  }
+
+  const filtroPontos = parseBooleanLike(comPontosValidos, false);
+
   try {
     const pool = await connectDB();
 
-    // Primeiro busca o total de grupos duplicados
-    const totalResult = await pool.request().query(`
+    // ─── Monta filtros de data ──────────────────────────────────────────────
+    const filtrosData = [];
+    if (dataInicio) filtrosData.push(`CAST(cad.DataCadastro AS DATE) >= @dataInicio`);
+    if (dataFim)    filtrosData.push(`CAST(cad.DataCadastro AS DATE) <= @dataFim`);
+    const whereData = filtrosData.length > 0 ? `AND ${filtrosData.join(' AND ')}` : '';
+
+    // ─── Filtro de pontos válidos ───────────────────────────────────────────
+    // Quando ativo, o grupo só entra no resultado se ao menos um CodigoCadastro
+    // do grupo tiver saldo > 0 em Fidelidade_Ponto.
+    const joinPontos = filtroPontos
+      ? `JOIN (
+           SELECT DISTINCT fp.CodigoCadastro
+           FROM INOVAFARMA_DPOPPARA.dbo.Fidelidade_Ponto fp
+           WHERE fp.Saldo > 0
+             AND CAST(fp.DataVencimento AS DATE) >= CAST(GETDATE() AS DATE)
+         ) fp_valido ON fp_valido.CodigoCadastro = cad.CodigoCadastro`
+      : '';
+
+    // ─── Total de grupos ───────────────────────────────────────────────────
+    const reqTotal = pool.request();
+    if (dataInicio) reqTotal.input('dataInicio', dataInicio);
+    if (dataFim)    reqTotal.input('dataFim', dataFim);
+
+    const totalResult = await reqTotal.query(`
       SELECT COUNT(*) AS total
       FROM (
-        SELECT LTRIM(RTRIM(CPFCNPJ)) AS CPFCNPJ
-        FROM INOVAFARMA_DPOPPARA.dbo.Cadastro
-        WHERE LTRIM(RTRIM(ISNULL(CPFCNPJ, ''))) <> ''
-        GROUP BY LTRIM(RTRIM(CPFCNPJ))
+        SELECT LTRIM(RTRIM(cad.CPFCNPJ)) AS CPFCNPJ
+        FROM INOVAFARMA_DPOPPARA.dbo.Cadastro cad
+        ${joinPontos}
+        WHERE LTRIM(RTRIM(ISNULL(cad.CPFCNPJ, ''))) <> ''
+          ${whereData}
+        GROUP BY LTRIM(RTRIM(cad.CPFCNPJ))
         HAVING COUNT(*) > 1
       ) AS duplicados
     `);
 
     const totalGrupos = totalResult.recordset[0].total;
 
-    // Busca os detalhes paginados por grupo de CPF/CNPJ duplicado
-    const result = await pool.request()
+    // ─── Detalhes paginados ────────────────────────────────────────────────
+    const reqMain = pool.request()
       .input('startRow', startRow)
-      .input('endRow', endRow)
-      .query(`
-        ;WITH CpfsDuplicados AS (
-          SELECT
-            LTRIM(RTRIM(CPFCNPJ)) AS CPFCNPJ,
-            COUNT(*) AS quantidade,
-            ROW_NUMBER() OVER (ORDER BY COUNT(*) DESC, LTRIM(RTRIM(CPFCNPJ))) AS RowNum
-          FROM INOVAFARMA_DPOPPARA.dbo.Cadastro
-          WHERE LTRIM(RTRIM(ISNULL(CPFCNPJ, ''))) <> ''
-          GROUP BY LTRIM(RTRIM(CPFCNPJ))
-          HAVING COUNT(*) > 1
-        ),
-        CpfsPaginados AS (
-          SELECT * FROM CpfsDuplicados
-          WHERE RowNum BETWEEN @startRow AND @endRow
-        )
-        SELECT
-          cad.CodigoCadastro,
-          cad.CodigoEmpresa,
-          cad.CodigoLancamento,
-          LTRIM(RTRIM(cad.Nome)) AS Nome,
-          LTRIM(RTRIM(cad.SobreNome)) AS SobreNome,
-          LTRIM(RTRIM(cad.CPFCNPJ)) AS CPFCNPJ,
-          cad.DataNascimento,
-          cad.DataCadastro,
-          cad.Eliminado,
-          cli.CodigoCliente,
-          dup.quantidade AS TotalDuplicados
-        FROM CpfsPaginados dup
-        JOIN INOVAFARMA_DPOPPARA.dbo.Cadastro cad
-          ON LTRIM(RTRIM(cad.CPFCNPJ)) = dup.CPFCNPJ
-        LEFT JOIN INOVAFARMA_DPOPPARA.dbo.Cliente cli
-          ON cli.CodigoCadastro = cad.CodigoCadastro
-        ORDER BY dup.quantidade DESC, dup.CPFCNPJ, cad.CodigoCadastro
-      `);
+      .input('endRow', endRow);
 
-    // Agrupa os resultados por CPFCNPJ para facilitar a visualização
+    if (dataInicio) reqMain.input('dataInicio', dataInicio);
+    if (dataFim)    reqMain.input('dataFim', dataFim);
+
+    const result = await reqMain.query(`
+      ;WITH CpfsDuplicados AS (
+        SELECT
+          LTRIM(RTRIM(cad.CPFCNPJ)) AS CPFCNPJ,
+          COUNT(*) AS quantidade,
+          ROW_NUMBER() OVER (ORDER BY COUNT(*) DESC, LTRIM(RTRIM(cad.CPFCNPJ))) AS RowNum
+        FROM INOVAFARMA_DPOPPARA.dbo.Cadastro cad
+        ${joinPontos}
+        WHERE LTRIM(RTRIM(ISNULL(cad.CPFCNPJ, ''))) <> ''
+          ${whereData}
+        GROUP BY LTRIM(RTRIM(cad.CPFCNPJ))
+        HAVING COUNT(*) > 1
+      ),
+      CpfsPaginados AS (
+        SELECT * FROM CpfsDuplicados
+        WHERE RowNum BETWEEN @startRow AND @endRow
+      )
+      SELECT
+        cad.CodigoCadastro,
+        cad.CodigoEmpresa,
+        cad.CodigoLancamento,
+        LTRIM(RTRIM(cad.Nome))      AS Nome,
+        LTRIM(RTRIM(cad.SobreNome)) AS SobreNome,
+        LTRIM(RTRIM(cad.CPFCNPJ))  AS CPFCNPJ,
+        cad.DataNascimento,
+        cad.DataCadastro,
+        cad.Eliminado,
+        cli.CodigoCliente,
+        ISNULL(SUM(fp2.Saldo), 0)   AS SaldoPontosDisponivel,
+        MAX(dup.quantidade)         AS TotalDuplicados
+      FROM CpfsPaginados dup
+      JOIN INOVAFARMA_DPOPPARA.dbo.Cadastro cad
+        ON LTRIM(RTRIM(cad.CPFCNPJ)) = dup.CPFCNPJ
+      LEFT JOIN INOVAFARMA_DPOPPARA.dbo.Cliente cli
+        ON cli.CodigoCadastro = cad.CodigoCadastro
+      LEFT JOIN INOVAFARMA_DPOPPARA.dbo.Fidelidade_Ponto fp2
+        ON fp2.CodigoCadastro = cad.CodigoCadastro
+       AND fp2.Saldo > 0
+       AND CAST(fp2.DataVencimento AS DATE) >= CAST(GETDATE() AS DATE)
+      GROUP BY
+        cad.CodigoCadastro, cad.CodigoEmpresa, cad.CodigoLancamento,
+        cad.Nome, cad.SobreNome, cad.CPFCNPJ,
+        cad.DataNascimento, cad.DataCadastro, cad.Eliminado,
+        cli.CodigoCliente
+      ORDER BY MAX(dup.quantidade) DESC, LTRIM(RTRIM(cad.CPFCNPJ)), cad.CodigoCadastro
+    `);
+
+    // ─── Agrupa por CPFCNPJ ────────────────────────────────────────────────
     const grupos = {};
     for (const linha of result.recordset) {
       const cpf = linha.CPFCNPJ;
@@ -622,6 +685,8 @@ router.get('/duplicados', async (req, res) => {
         DataCadastro: linha.DataCadastro,
         Eliminado: linha.Eliminado,
         CodigoCliente: linha.CodigoCliente,
+        SaldoPontosDisponivel: Number(linha.SaldoPontosDisponivel),
+        temPontosValidos: Number(linha.SaldoPontosDisponivel) > 0,
       });
     }
 
@@ -630,9 +695,279 @@ router.get('/duplicados', async (req, res) => {
       limite: limitNumber,
       totalGruposDuplicados: totalGrupos,
       totalNestaPagina: Object.keys(grupos).length,
+      filtrosAtivos: {
+        comPontosValidos: filtroPontos,
+        dataInicio: dataInicio || null,
+        dataFim: dataFim || null,
+      },
       duplicados: Object.values(grupos),
     });
   } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /cadastro/duplicados/excluir-em-massa
+// Remove em massa cadastros duplicados dentro de um período, respeitando FKs.
+//
+// Estratégia de FKs:
+//   Tabelas seguras para deletar em cascata: Cadastro_Contato, Fidelidade_Ponto,
+//   Cliente_Convenio, Cliente.
+//   Tabelas com dados históricos (Venda, Fiscal, Fornecedor, Orcamento): o cadastro
+//   é PULADO automaticamente e reportado em "naoExcluidosPorVinculo".
+//
+// Body (JSON):
+//   dataInicio    (obrigatório) — "YYYY-MM-DD"
+//   dataFim       (obrigatório) — "YYYY-MM-DD"
+//   manter        (opcional)    — "mais_antigo" (default) | "mais_recente"
+//   apenasSimular (opcional)    — true = dry-run, não altera nada
+router.delete('/duplicados/excluir-em-massa', async (req, res) => {
+  const { dataInicio, dataFim, manter = 'mais_antigo', apenasSimular = false } = req.body || {};
+
+  const reData = /^\d{4}-\d{2}-\d{2}$/;
+  if (!dataInicio || !reData.test(dataInicio)) {
+    return res.status(400).json({ error: 'dataInicio é obrigatório e deve estar no formato YYYY-MM-DD.' });
+  }
+  if (!dataFim || !reData.test(dataFim)) {
+    return res.status(400).json({ error: 'dataFim é obrigatório e deve estar no formato YYYY-MM-DD.' });
+  }
+  if (!['mais_antigo', 'mais_recente'].includes(manter)) {
+    return res.status(400).json({ error: 'manter deve ser "mais_antigo" ou "mais_recente".' });
+  }
+
+  const simular = parseBooleanLike(apenasSimular, false);
+  // mais_antigo → mantém menor CodigoCadastro; mais_recente → mantém maior
+  const rankOrder = manter === 'mais_antigo' ? 'ASC' : 'DESC';
+
+  let transaction;
+
+  try {
+    const pool = await connectDB();
+
+    // ─── 1. Levanta candidatos a exclusão ─────────────────────────────────
+    // Usa batch() em vez de query() para evitar o limite nvarchar(4000) do
+    // SQL Server 2008 com queries longas. As datas são validadas por regex acima.
+    const candidatosResult = await pool.request().batch(`
+        ;WITH DuplicadosPeriodo AS (
+          SELECT
+            cad.CodigoCadastro,
+            LTRIM(RTRIM(cad.CPFCNPJ)) AS CPFCNPJ,
+            LTRIM(RTRIM(cad.Nome))     AS Nome,
+            cad.DataCadastro,
+            cli.CodigoCliente,
+            ROW_NUMBER() OVER (
+              PARTITION BY LTRIM(RTRIM(cad.CPFCNPJ))
+              ORDER BY cad.CodigoCadastro ${rankOrder}
+            ) AS rn,
+            COUNT(*) OVER (
+              PARTITION BY LTRIM(RTRIM(cad.CPFCNPJ))
+            ) AS totalNoGrupo
+          FROM INOVAFARMA_DPOPPARA.dbo.Cadastro cad
+          LEFT JOIN INOVAFARMA_DPOPPARA.dbo.Cliente cli
+            ON cli.CodigoCadastro = cad.CodigoCadastro
+          WHERE LTRIM(RTRIM(ISNULL(cad.CPFCNPJ, ''))) <> ''
+            AND CAST(cad.DataCadastro AS DATE) BETWEEN '${dataInicio}' AND '${dataFim}'
+        )
+        SELECT *
+        FROM DuplicadosPeriodo
+        WHERE totalNoGrupo > 1
+        ORDER BY CPFCNPJ, rn
+      `);
+
+    const todos       = candidatosResult.recordset;
+    const paraExcluir = todos.filter(r => r.rn > 1);
+    const paraManter  = todos.filter(r => r.rn === 1);
+
+    if (paraExcluir.length === 0) {
+      return res.json({
+        mensagem: 'Nenhum cadastro duplicado encontrado no período informado.',
+        periodo: { dataInicio, dataFim },
+        criterioManter: manter,
+        totalExcluidos: 0,
+        simulacao: simular,
+      });
+    }
+
+    // ─── 2. Verifica vínculos históricos (antes de qualquer exclusão) ──────
+    // Usa tabela temporária para evitar limite de tamanho de parâmetro no SQL Server 2008.
+    // Separa em batch individuais para garantir leitura correta dos recordsets.
+    const insertsCadastro = paraExcluir
+      .map(r => `(${r.CodigoCadastro}, ${r.CodigoCliente ?? 'NULL'})`)
+      .join(',');
+
+    // Cria e popula a temp table
+    await pool.request().batch(`
+      IF OBJECT_ID('tempdb..#TempCandidatos') IS NOT NULL DROP TABLE #TempCandidatos;
+      CREATE TABLE #TempCandidatos (CodigoCadastro INT, CodigoCliente INT NULL);
+      INSERT INTO #TempCandidatos (CodigoCadastro, CodigoCliente) VALUES ${insertsCadastro};
+    `);
+
+    // Faz o SELECT de vínculos separado — resultado limpo no recordset[0]
+    const vinculosResult = await pool.request().batch(`
+      SELECT DISTINCT t.CodigoCadastro, 'Venda' AS Tabela
+        FROM INOVAFARMA_DPOPPARA.dbo.Venda v
+        JOIN #TempCandidatos t ON t.CodigoCadastro = v.CodigoCadastro
+      UNION ALL
+      SELECT DISTINCT t.CodigoCadastro, 'Fiscal' AS Tabela
+        FROM INOVAFARMA_DPOPPARA.dbo.Fiscal f
+        JOIN #TempCandidatos t ON t.CodigoCadastro = f.CodigoCadastro
+      UNION ALL
+      SELECT DISTINCT t.CodigoCadastro, 'Fornecedor' AS Tabela
+        FROM INOVAFARMA_DPOPPARA.dbo.Fornecedor fn
+        JOIN #TempCandidatos t ON t.CodigoCadastro = fn.CodigoCadastro
+      UNION ALL
+      SELECT DISTINCT t.CodigoCadastro, 'Orcamento' AS Tabela
+        FROM INOVAFARMA_DPOPPARA.dbo.Orcamento o
+        JOIN #TempCandidatos t ON t.CodigoCliente = o.CodigoCliente
+        WHERE t.CodigoCliente IS NOT NULL
+    `);
+
+    // Dropa a temp table
+    await pool.request().batch(`
+      IF OBJECT_ID('tempdb..#TempCandidatos') IS NOT NULL DROP TABLE #TempCandidatos;
+    `);
+
+    // Monta set de CodigoCadastro bloqueados e o motivo
+    const vinculosRows = vinculosResult.recordset ?? [];
+    const bloqueados = new Map(); // CodigoCadastro → [tabelas]
+    for (const row of vinculosRows) {
+      const cod = row.CodigoCadastro;
+      if (!bloqueados.has(cod)) bloqueados.set(cod, []);
+      if (!bloqueados.get(cod).includes(row.Tabela)) {
+        bloqueados.get(cod).push(row.Tabela);
+      }
+    }
+
+    const aptoParaExcluir    = paraExcluir.filter(r => !bloqueados.has(r.CodigoCadastro));
+    const naoExcluidosPorVinculo = paraExcluir
+      .filter(r => bloqueados.has(r.CodigoCadastro))
+      .map(r => ({
+        CodigoCadastro: r.CodigoCadastro,
+        CPFCNPJ: r.CPFCNPJ,
+        Nome: r.Nome,
+        DataCadastro: r.DataCadastro,
+        CodigoCliente: r.CodigoCliente,
+        motivoBloqueio: bloqueados.get(r.CodigoCadastro),
+      }));
+
+    // ─── 3. Simulação ─────────────────────────────────────────────────────
+    if (simular) {
+      return res.json({
+        mensagem: 'SIMULAÇÃO — nenhum dado foi alterado.',
+        periodo: { dataInicio, dataFim },
+        criterioManter: manter,
+        simulacao: true,
+        totalGruposAfetados: paraManter.length,
+        totalQueSeriaExcluido: aptoParaExcluir.length,
+        totalBloqueadosPorVinculo: naoExcluidosPorVinculo.length,
+        registrosQueSeriaExcluidos: aptoParaExcluir.map(r => ({
+          CodigoCadastro: r.CodigoCadastro,
+          CPFCNPJ: r.CPFCNPJ,
+          Nome: r.Nome,
+          DataCadastro: r.DataCadastro,
+          CodigoCliente: r.CodigoCliente,
+        })),
+        registrosQueSeriaMantiods: paraManter.map(r => ({
+          CodigoCadastro: r.CodigoCadastro,
+          CPFCNPJ: r.CPFCNPJ,
+          Nome: r.Nome,
+          DataCadastro: r.DataCadastro,
+          CodigoCliente: r.CodigoCliente,
+        })),
+        naoExcluidosPorVinculo,
+      });
+    }
+
+    if (aptoParaExcluir.length === 0) {
+      return res.json({
+        mensagem: 'Todos os cadastros duplicados possuem vínculos históricos e não podem ser excluídos.',
+        periodo: { dataInicio, dataFim },
+        criterioManter: manter,
+        totalExcluidos: 0,
+        naoExcluidosPorVinculo,
+      });
+    }
+
+    // ─── 4. Exclusão real em transação ────────────────────────────────────
+    transaction = new sql.Transaction(pool);
+    await transaction.begin();
+
+    let totalContatosRemovidos       = 0;
+    let totalPontosRemovidos         = 0;
+    let totalConveniosRemovidos      = 0;
+    let totalClientesRemovidos       = 0;
+    let totalCadastrosRemovidos      = 0;
+
+    for (const reg of aptoParaExcluir) {
+      // a) Cadastro_Contato
+      const resContato = await new sql.Request(transaction)
+        .input('codigoCadastro', reg.CodigoCadastro)
+        .query(`DELETE FROM INOVAFARMA_DPOPPARA.dbo.Cadastro_Contato WHERE CodigoCadastro = @codigoCadastro`);
+      totalContatosRemovidos += resContato.rowsAffected[0] || 0;
+
+      // b) Fidelidade_Ponto
+      const resPonto = await new sql.Request(transaction)
+        .input('codigoCadastro', reg.CodigoCadastro)
+        .query(`DELETE FROM INOVAFARMA_DPOPPARA.dbo.Fidelidade_Ponto WHERE CodigoCadastro = @codigoCadastro`);
+      totalPontosRemovidos += resPonto.rowsAffected[0] || 0;
+
+      if (reg.CodigoCliente != null) {
+        // c) Cliente_Convenio
+        const resCC = await new sql.Request(transaction)
+          .input('codigoCliente', reg.CodigoCliente)
+          .query(`DELETE FROM INOVAFARMA_DPOPPARA.dbo.Cliente_Convenio WHERE CodigoCliente = @codigoCliente`);
+        totalConveniosRemovidos += resCC.rowsAffected[0] || 0;
+
+        // d) Cliente
+        const resCli = await new sql.Request(transaction)
+          .input('codigoCliente', reg.CodigoCliente)
+          .query(`DELETE FROM INOVAFARMA_DPOPPARA.dbo.Cliente WHERE CodigoCliente = @codigoCliente`);
+        totalClientesRemovidos += resCli.rowsAffected[0] || 0;
+      }
+
+      // e) Cadastro
+      const resCad = await new sql.Request(transaction)
+        .input('codigoCadastro', reg.CodigoCadastro)
+        .query(`DELETE FROM INOVAFARMA_DPOPPARA.dbo.Cadastro WHERE CodigoCadastro = @codigoCadastro`);
+      totalCadastrosRemovidos += resCad.rowsAffected[0] || 0;
+    }
+
+    await transaction.commit();
+
+    return res.json({
+      mensagem: 'Exclusão em massa concluída.',
+      periodo: { dataInicio, dataFim },
+      criterioManter: manter,
+      simulacao: false,
+      resumo: {
+        totalGruposAfetados: paraManter.length,
+        totalCadastrosExcluidos: totalCadastrosRemovidos,
+        totalClientesExcluidos: totalClientesRemovidos,
+        totalVinculosConvenioRemovidos: totalConveniosRemovidos,
+        totalContatosRemovidos,
+        totalPontosRemovidosJuntos: totalPontosRemovidos,
+        totalBloqueadosPorVinculo: naoExcluidosPorVinculo.length,
+      },
+      registrosExcluidos: aptoParaExcluir.map(r => ({
+        CodigoCadastro: r.CodigoCadastro,
+        CPFCNPJ: r.CPFCNPJ,
+        Nome: r.Nome,
+        DataCadastro: r.DataCadastro,
+        CodigoCliente: r.CodigoCliente,
+      })),
+      registrosMantiods: paraManter.map(r => ({
+        CodigoCadastro: r.CodigoCadastro,
+        CPFCNPJ: r.CPFCNPJ,
+        Nome: r.Nome,
+        DataCadastro: r.DataCadastro,
+        CodigoCliente: r.CodigoCliente,
+      })),
+      naoExcluidosPorVinculo,
+    });
+  } catch (err) {
+    if (transaction) {
+      try { await transaction.rollback(); } catch { /* preserva erro original */ }
+    }
     return res.status(500).json({ error: err.message });
   }
 });
