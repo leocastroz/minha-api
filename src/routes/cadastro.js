@@ -543,6 +543,7 @@ router.post('/', async (req, res) => {
 //   comPontosValidos     — "true" para retornar somente grupos que têm ao menos 1 cadastro com saldo de pontos > 0
 //   dataInicio           — filtro de DataCadastro (formato YYYY-MM-DD), ex: 2024-12-05
 //   dataFim              — filtro de DataCadastro (formato YYYY-MM-DD), ex: 2025-12-05
+//   incluirEliminados    — "true" para incluir cadastros com Eliminado=1 (default: false)
 router.get('/duplicados', async (req, res) => {
   const {
     page = 1,
@@ -550,6 +551,7 @@ router.get('/duplicados', async (req, res) => {
     comPontosValidos,
     dataInicio,
     dataFim,
+    incluirEliminados,
   } = req.query;
 
   const pageNumber = Number(page);
@@ -566,7 +568,8 @@ router.get('/duplicados', async (req, res) => {
     return res.status(400).json({ error: 'dataFim deve estar no formato YYYY-MM-DD.' });
   }
 
-  const filtroPontos = parseBooleanLike(comPontosValidos, false);
+  const filtroPontos      = parseBooleanLike(comPontosValidos, false);
+  const mostrarEliminados = parseBooleanLike(incluirEliminados, false);
 
   try {
     const pool = await connectDB();
@@ -575,6 +578,8 @@ router.get('/duplicados', async (req, res) => {
     const filtrosData = [];
     if (dataInicio) filtrosData.push(`CAST(cad.DataCadastro AS DATE) >= @dataInicio`);
     if (dataFim)    filtrosData.push(`CAST(cad.DataCadastro AS DATE) <= @dataFim`);
+    // Por padrão exclui cadastros marcados como Eliminado=1
+    if (!mostrarEliminados) filtrosData.push(`ISNULL(cad.Eliminado, 0) = 0`);
     const whereData = filtrosData.length > 0 ? `AND ${filtrosData.join(' AND ')}` : '';
 
     // ─── Filtro de pontos válidos ───────────────────────────────────────────
@@ -697,6 +702,7 @@ router.get('/duplicados', async (req, res) => {
       totalNestaPagina: Object.keys(grupos).length,
       filtrosAtivos: {
         comPontosValidos: filtroPontos,
+        incluirEliminados: mostrarEliminados,
         dataInicio: dataInicio || null,
         dataFim: dataFim || null,
       },
@@ -708,21 +714,26 @@ router.get('/duplicados', async (req, res) => {
 });
 
 // DELETE /cadastro/duplicados/excluir-em-massa
-// Remove em massa cadastros duplicados dentro de um período, respeitando FKs.
-//
-// Estratégia de FKs:
-//   Tabelas seguras para deletar em cascata: Cadastro_Contato, Fidelidade_Ponto,
-//   Cliente_Convenio, Cliente.
-//   Tabelas com dados históricos (Venda, Fiscal, Fornecedor, Orcamento): o cadastro
-//   é PULADO automaticamente e reportado em "naoExcluidosPorVinculo".
+// Remove ou inativa em massa cadastros duplicados dentro de um período.
 //
 // Body (JSON):
 //   dataInicio    (obrigatório) — "YYYY-MM-DD"
 //   dataFim       (obrigatório) — "YYYY-MM-DD"
 //   manter        (opcional)    — "mais_antigo" (default) | "mais_recente"
+//   estrategia    (opcional)    — "excluir" (default) | "marcar_eliminado"
+//                   "excluir"          → DELETE físico; cadastros com vínculo em Venda/Fiscal/
+//                                        Fornecedor/Orcamento são pulados e reportados.
+//                   "marcar_eliminado" → SET Eliminado=1; funciona em 100% dos casos pois
+//                                        não viola FKs.
 //   apenasSimular (opcional)    — true = dry-run, não altera nada
 router.delete('/duplicados/excluir-em-massa', async (req, res) => {
-  const { dataInicio, dataFim, manter = 'mais_antigo', apenasSimular = false } = req.body || {};
+  const {
+    dataInicio,
+    dataFim,
+    manter = 'mais_antigo',
+    estrategia = 'excluir',
+    apenasSimular = false,
+  } = req.body || {};
 
   const reData = /^\d{4}-\d{2}-\d{2}$/;
   if (!dataInicio || !reData.test(dataInicio)) {
@@ -734,9 +745,11 @@ router.delete('/duplicados/excluir-em-massa', async (req, res) => {
   if (!['mais_antigo', 'mais_recente'].includes(manter)) {
     return res.status(400).json({ error: 'manter deve ser "mais_antigo" ou "mais_recente".' });
   }
+  if (!['excluir', 'marcar_eliminado', 'forcar_exclusao'].includes(estrategia)) {
+    return res.status(400).json({ error: 'estrategia deve ser "excluir", "marcar_eliminado" ou "forcar_exclusao".' });
+  }
 
-  const simular = parseBooleanLike(apenasSimular, false);
-  // mais_antigo → mantém menor CodigoCadastro; mais_recente → mantém maior
+  const simular   = parseBooleanLike(apenasSimular, false);
   const rankOrder = manter === 'mais_antigo' ? 'ASC' : 'DESC';
 
   let transaction;
@@ -744,127 +757,132 @@ router.delete('/duplicados/excluir-em-massa', async (req, res) => {
   try {
     const pool = await connectDB();
 
-    // ─── 1. Levanta candidatos a exclusão ─────────────────────────────────
-    // Usa batch() em vez de query() para evitar o limite nvarchar(4000) do
-    // SQL Server 2008 com queries longas. As datas são validadas por regex acima.
+    // ─── 1. Levanta candidatos ────────────────────────────────────────────
     const candidatosResult = await pool.request().batch(`
-        ;WITH DuplicadosPeriodo AS (
-          SELECT
-            cad.CodigoCadastro,
-            LTRIM(RTRIM(cad.CPFCNPJ)) AS CPFCNPJ,
-            LTRIM(RTRIM(cad.Nome))     AS Nome,
-            cad.DataCadastro,
-            cli.CodigoCliente,
-            ROW_NUMBER() OVER (
-              PARTITION BY LTRIM(RTRIM(cad.CPFCNPJ))
-              ORDER BY cad.CodigoCadastro ${rankOrder}
-            ) AS rn,
-            COUNT(*) OVER (
-              PARTITION BY LTRIM(RTRIM(cad.CPFCNPJ))
-            ) AS totalNoGrupo
-          FROM INOVAFARMA_DPOPPARA.dbo.Cadastro cad
-          LEFT JOIN INOVAFARMA_DPOPPARA.dbo.Cliente cli
-            ON cli.CodigoCadastro = cad.CodigoCadastro
-          WHERE LTRIM(RTRIM(ISNULL(cad.CPFCNPJ, ''))) <> ''
-            AND CAST(cad.DataCadastro AS DATE) BETWEEN '${dataInicio}' AND '${dataFim}'
-        )
-        SELECT *
-        FROM DuplicadosPeriodo
-        WHERE totalNoGrupo > 1
-        ORDER BY CPFCNPJ, rn
-      `);
+      ;WITH DuplicadosPeriodo AS (
+        SELECT
+          cad.CodigoCadastro,
+          LTRIM(RTRIM(cad.CPFCNPJ)) AS CPFCNPJ,
+          LTRIM(RTRIM(cad.Nome))     AS Nome,
+          cad.DataCadastro,
+          cad.Eliminado,
+          cli.CodigoCliente,
+          ROW_NUMBER() OVER (
+            PARTITION BY LTRIM(RTRIM(cad.CPFCNPJ))
+            ORDER BY cad.CodigoCadastro ${rankOrder}
+          ) AS rn,
+          COUNT(*) OVER (
+            PARTITION BY LTRIM(RTRIM(cad.CPFCNPJ))
+          ) AS totalNoGrupo
+        FROM INOVAFARMA_DPOPPARA.dbo.Cadastro cad
+        LEFT JOIN INOVAFARMA_DPOPPARA.dbo.Cliente cli
+          ON cli.CodigoCadastro = cad.CodigoCadastro
+        WHERE LTRIM(RTRIM(ISNULL(cad.CPFCNPJ, ''))) <> ''
+          AND CAST(cad.DataCadastro AS DATE) BETWEEN '${dataInicio}' AND '${dataFim}'
+      )
+      SELECT *
+      FROM DuplicadosPeriodo
+      WHERE totalNoGrupo > 1
+      ORDER BY CPFCNPJ, rn
+    `);
 
-    const todos       = candidatosResult.recordset;
-    const paraExcluir = todos.filter(r => r.rn > 1);
-    const paraManter  = todos.filter(r => r.rn === 1);
+    const todos      = candidatosResult.recordset;
+    const paraAgir   = todos.filter(r => r.rn > 1);
+    const paraManter = todos.filter(r => r.rn === 1);
 
-    if (paraExcluir.length === 0) {
+    if (paraAgir.length === 0) {
       return res.json({
         mensagem: 'Nenhum cadastro duplicado encontrado no período informado.',
         periodo: { dataInicio, dataFim },
         criterioManter: manter,
-        totalExcluidos: 0,
+        estrategia,
+        totalAfetados: 0,
         simulacao: simular,
       });
     }
 
-    // ─── 2. Verifica vínculos históricos (antes de qualquer exclusão) ──────
-    // Usa tabela temporária para evitar limite de tamanho de parâmetro no SQL Server 2008.
-    // Separa em batch individuais para garantir leitura correta dos recordsets.
-    const insertsCadastro = paraExcluir
-      .map(r => `(${r.CodigoCadastro}, ${r.CodigoCliente ?? 'NULL'})`)
-      .join(',');
+    // ─── 2. Verifica vínculos históricos (só para estrategia "excluir") ───
+    // "forcar_exclusao" pula esta etapa — deleta tudo inclusive histórico.
+    let aptoParaAgir             = paraAgir;
+    let naoProcessadosPorVinculo = [];
 
-    // Cria e popula a temp table
-    await pool.request().batch(`
-      IF OBJECT_ID('tempdb..#TempCandidatos') IS NOT NULL DROP TABLE #TempCandidatos;
-      CREATE TABLE #TempCandidatos (CodigoCadastro INT, CodigoCliente INT NULL);
-      INSERT INTO #TempCandidatos (CodigoCadastro, CodigoCliente) VALUES ${insertsCadastro};
-    `);
+    if (estrategia === 'excluir') {
+      const insertsCadastro = paraAgir
+        .map(r => `(${r.CodigoCadastro}, ${r.CodigoCliente ?? 'NULL'})`)
+        .join(',');
 
-    // Faz o SELECT de vínculos separado — resultado limpo no recordset[0]
-    const vinculosResult = await pool.request().batch(`
-      SELECT DISTINCT t.CodigoCadastro, 'Venda' AS Tabela
-        FROM INOVAFARMA_DPOPPARA.dbo.Venda v
-        JOIN #TempCandidatos t ON t.CodigoCadastro = v.CodigoCadastro
-      UNION ALL
-      SELECT DISTINCT t.CodigoCadastro, 'Fiscal' AS Tabela
-        FROM INOVAFARMA_DPOPPARA.dbo.Fiscal f
-        JOIN #TempCandidatos t ON t.CodigoCadastro = f.CodigoCadastro
-      UNION ALL
-      SELECT DISTINCT t.CodigoCadastro, 'Fornecedor' AS Tabela
-        FROM INOVAFARMA_DPOPPARA.dbo.Fornecedor fn
-        JOIN #TempCandidatos t ON t.CodigoCadastro = fn.CodigoCadastro
-      UNION ALL
-      SELECT DISTINCT t.CodigoCadastro, 'Orcamento' AS Tabela
-        FROM INOVAFARMA_DPOPPARA.dbo.Orcamento o
-        JOIN #TempCandidatos t ON t.CodigoCliente = o.CodigoCliente
-        WHERE t.CodigoCliente IS NOT NULL
-    `);
+      await pool.request().batch(`
+        IF OBJECT_ID('tempdb..#TempCandidatos') IS NOT NULL DROP TABLE #TempCandidatos;
+        CREATE TABLE #TempCandidatos (CodigoCadastro INT, CodigoCliente INT NULL);
+        INSERT INTO #TempCandidatos (CodigoCadastro, CodigoCliente) VALUES ${insertsCadastro};
+      `);
 
-    // Dropa a temp table
-    await pool.request().batch(`
-      IF OBJECT_ID('tempdb..#TempCandidatos') IS NOT NULL DROP TABLE #TempCandidatos;
-    `);
+      const vinculosResult = await pool.request().batch(`
+        SELECT DISTINCT t.CodigoCadastro, 'Venda' AS Tabela
+          FROM INOVAFARMA_DPOPPARA.dbo.Venda v
+          JOIN #TempCandidatos t ON t.CodigoCadastro = v.CodigoCadastro
+        UNION ALL
+        SELECT DISTINCT t.CodigoCadastro, 'Fiscal' AS Tabela
+          FROM INOVAFARMA_DPOPPARA.dbo.Fiscal f
+          JOIN #TempCandidatos t ON t.CodigoCadastro = f.CodigoCadastro
+        UNION ALL
+        SELECT DISTINCT t.CodigoCadastro, 'Fornecedor' AS Tabela
+          FROM INOVAFARMA_DPOPPARA.dbo.Fornecedor fn
+          JOIN #TempCandidatos t ON t.CodigoCadastro = fn.CodigoCadastro
+        UNION ALL
+        SELECT DISTINCT t.CodigoCadastro, 'Orcamento' AS Tabela
+          FROM INOVAFARMA_DPOPPARA.dbo.Orcamento o
+          JOIN #TempCandidatos t ON t.CodigoCliente = o.CodigoCliente
+          WHERE t.CodigoCliente IS NOT NULL
+      `);
 
-    // Monta set de CodigoCadastro bloqueados e o motivo
-    const vinculosRows = vinculosResult.recordset ?? [];
-    const bloqueados = new Map(); // CodigoCadastro → [tabelas]
-    for (const row of vinculosRows) {
-      const cod = row.CodigoCadastro;
-      if (!bloqueados.has(cod)) bloqueados.set(cod, []);
-      if (!bloqueados.get(cod).includes(row.Tabela)) {
-        bloqueados.get(cod).push(row.Tabela);
+      await pool.request().batch(`
+        IF OBJECT_ID('tempdb..#TempCandidatos') IS NOT NULL DROP TABLE #TempCandidatos;
+      `);
+
+      const bloqueados = new Map();
+      for (const row of (vinculosResult.recordset ?? [])) {
+        const cod = row.CodigoCadastro;
+        if (!bloqueados.has(cod)) bloqueados.set(cod, []);
+        if (!bloqueados.get(cod).includes(row.Tabela)) bloqueados.get(cod).push(row.Tabela);
       }
-    }
 
-    const aptoParaExcluir    = paraExcluir.filter(r => !bloqueados.has(r.CodigoCadastro));
-    const naoExcluidosPorVinculo = paraExcluir
-      .filter(r => bloqueados.has(r.CodigoCadastro))
-      .map(r => ({
-        CodigoCadastro: r.CodigoCadastro,
-        CPFCNPJ: r.CPFCNPJ,
-        Nome: r.Nome,
-        DataCadastro: r.DataCadastro,
-        CodigoCliente: r.CodigoCliente,
-        motivoBloqueio: bloqueados.get(r.CodigoCadastro),
-      }));
-
-    // ─── 3. Simulação ─────────────────────────────────────────────────────
-    if (simular) {
-      return res.json({
-        mensagem: 'SIMULAÇÃO — nenhum dado foi alterado.',
-        periodo: { dataInicio, dataFim },
-        criterioManter: manter,
-        simulacao: true,
-        totalGruposAfetados: paraManter.length,
-        totalQueSeriaExcluido: aptoParaExcluir.length,
-        totalBloqueadosPorVinculo: naoExcluidosPorVinculo.length,
-        registrosQueSeriaExcluidos: aptoParaExcluir.map(r => ({
+      aptoParaAgir = paraAgir.filter(r => !bloqueados.has(r.CodigoCadastro));
+      naoProcessadosPorVinculo = paraAgir
+        .filter(r => bloqueados.has(r.CodigoCadastro))
+        .map(r => ({
           CodigoCadastro: r.CodigoCadastro,
           CPFCNPJ: r.CPFCNPJ,
           Nome: r.Nome,
           DataCadastro: r.DataCadastro,
+          CodigoCliente: r.CodigoCliente,
+          motivoBloqueio: bloqueados.get(r.CodigoCadastro),
+          sugestao: 'Use estrategia "marcar_eliminado" para inativar sem violar FKs.',
+        }));
+    }
+
+    // ─── 3. Simulação ─────────────────────────────────────────────────────
+    if (simular) {
+      const acaoLabel = estrategia === 'excluir'
+        ? 'excluídos'
+        : estrategia === 'forcar_exclusao'
+          ? 'excluídos forçadamente (com todo o histórico)'
+          : 'marcados como Eliminado';
+      return res.json({
+        mensagem: `SIMULAÇÃO — nenhum dado foi alterado. ${aptoParaAgir.length} registro(s) seria(m) ${acaoLabel}.`,
+        periodo: { dataInicio, dataFim },
+        criterioManter: manter,
+        estrategia,
+        simulacao: true,
+        totalGruposAfetados: paraManter.length,
+        totalQueSeriaAfetado: aptoParaAgir.length,
+        totalBloqueadosPorVinculo: naoProcessadosPorVinculo.length,
+        registrosQueSeriaAfetados: aptoParaAgir.map(r => ({
+          CodigoCadastro: r.CodigoCadastro,
+          CPFCNPJ: r.CPFCNPJ,
+          Nome: r.Nome,
+          DataCadastro: r.DataCadastro,
+          Eliminado: r.Eliminado,
           CodigoCliente: r.CodigoCliente,
         })),
         registrosQueSeriaMantiods: paraManter.map(r => ({
@@ -874,81 +892,120 @@ router.delete('/duplicados/excluir-em-massa', async (req, res) => {
           DataCadastro: r.DataCadastro,
           CodigoCliente: r.CodigoCliente,
         })),
-        naoExcluidosPorVinculo,
+        naoProcessadosPorVinculo,
       });
     }
 
-    if (aptoParaExcluir.length === 0) {
+    if (aptoParaAgir.length === 0) {
       return res.json({
-        mensagem: 'Todos os cadastros duplicados possuem vínculos históricos e não podem ser excluídos.',
+        mensagem: 'Todos os cadastros duplicados possuem vínculos históricos e não podem ser excluídos fisicamente. Use estrategia "marcar_eliminado" para inativá-los.',
         periodo: { dataInicio, dataFim },
         criterioManter: manter,
-        totalExcluidos: 0,
-        naoExcluidosPorVinculo,
+        estrategia,
+        totalAfetados: 0,
+        naoProcessadosPorVinculo,
       });
     }
 
-    // ─── 4. Exclusão real em transação ────────────────────────────────────
+    // ─── 4. Execução real em transação ────────────────────────────────────
     transaction = new sql.Transaction(pool);
     await transaction.begin();
 
-    let totalContatosRemovidos       = 0;
-    let totalPontosRemovidos         = 0;
-    let totalConveniosRemovidos      = 0;
-    let totalClientesRemovidos       = 0;
-    let totalCadastrosRemovidos      = 0;
+    let totalCadastrosAfetados  = 0;
+    let totalClientesAfetados   = 0;
+    let totalConveniosRemovidos = 0;
+    let totalContatosRemovidos  = 0;
+    let totalPontosRemovidos    = 0;
 
-    for (const reg of aptoParaExcluir) {
-      // a) Cadastro_Contato
-      const resContato = await new sql.Request(transaction)
-        .input('codigoCadastro', reg.CodigoCadastro)
-        .query(`DELETE FROM INOVAFARMA_DPOPPARA.dbo.Cadastro_Contato WHERE CodigoCadastro = @codigoCadastro`);
-      totalContatosRemovidos += resContato.rowsAffected[0] || 0;
+    for (const reg of aptoParaAgir) {
+      if (estrategia === 'marcar_eliminado') {
+        // Marca Eliminado = 1 no Cadastro
+        const resCad = await new sql.Request(transaction)
+          .input('codigoCadastro', reg.CodigoCadastro)
+          .query(`UPDATE INOVAFARMA_DPOPPARA.dbo.Cadastro SET Eliminado = 1 WHERE CodigoCadastro = @codigoCadastro`);
+        totalCadastrosAfetados += resCad.rowsAffected[0] || 0;
 
-      // b) Fidelidade_Ponto
-      const resPonto = await new sql.Request(transaction)
-        .input('codigoCadastro', reg.CodigoCadastro)
-        .query(`DELETE FROM INOVAFARMA_DPOPPARA.dbo.Fidelidade_Ponto WHERE CodigoCadastro = @codigoCadastro`);
-      totalPontosRemovidos += resPonto.rowsAffected[0] || 0;
+        // Marca Eliminado = 1 no Cliente (se existir)
+        if (reg.CodigoCliente != null) {
+          const resCli = await new sql.Request(transaction)
+            .input('codigoCliente', reg.CodigoCliente)
+            .query(`UPDATE INOVAFARMA_DPOPPARA.dbo.Cliente SET Eliminado = 1 WHERE CodigoCliente = @codigoCliente`);
+          totalClientesAfetados += resCli.rowsAffected[0] || 0;
+        }
+      } else {
+        // DELETE físico em cascata (excluir ou forcar_exclusao)
+        const resContato = await new sql.Request(transaction)
+          .input('codigoCadastro', reg.CodigoCadastro)
+          .query(`DELETE FROM INOVAFARMA_DPOPPARA.dbo.Cadastro_Contato WHERE CodigoCadastro = @codigoCadastro`);
+        totalContatosRemovidos += resContato.rowsAffected[0] || 0;
 
-      if (reg.CodigoCliente != null) {
-        // c) Cliente_Convenio
-        const resCC = await new sql.Request(transaction)
-          .input('codigoCliente', reg.CodigoCliente)
-          .query(`DELETE FROM INOVAFARMA_DPOPPARA.dbo.Cliente_Convenio WHERE CodigoCliente = @codigoCliente`);
-        totalConveniosRemovidos += resCC.rowsAffected[0] || 0;
+        const resPonto = await new sql.Request(transaction)
+          .input('codigoCadastro', reg.CodigoCadastro)
+          .query(`DELETE FROM INOVAFARMA_DPOPPARA.dbo.Fidelidade_Ponto WHERE CodigoCadastro = @codigoCadastro`);
+        totalPontosRemovidos += resPonto.rowsAffected[0] || 0;
 
-        // d) Cliente
-        const resCli = await new sql.Request(transaction)
-          .input('codigoCliente', reg.CodigoCliente)
-          .query(`DELETE FROM INOVAFARMA_DPOPPARA.dbo.Cliente WHERE CodigoCliente = @codigoCliente`);
-        totalClientesRemovidos += resCli.rowsAffected[0] || 0;
+        if (reg.CodigoCliente != null) {
+          const resCC = await new sql.Request(transaction)
+            .input('codigoCliente', reg.CodigoCliente)
+            .query(`DELETE FROM INOVAFARMA_DPOPPARA.dbo.Cliente_Convenio WHERE CodigoCliente = @codigoCliente`);
+          totalConveniosRemovidos += resCC.rowsAffected[0] || 0;
+
+          // forcar_exclusao: remove também Venda, Fiscal, Orcamento, Fornecedor
+          if (estrategia === 'forcar_exclusao') {
+            await new sql.Request(transaction)
+              .input('codigoCliente', reg.CodigoCliente)
+              .query(`DELETE FROM INOVAFARMA_DPOPPARA.dbo.Orcamento WHERE CodigoCliente = @codigoCliente`);
+
+            await new sql.Request(transaction)
+              .input('codigoCadastro', reg.CodigoCadastro)
+              .query(`DELETE FROM INOVAFARMA_DPOPPARA.dbo.Venda WHERE CodigoCadastro = @codigoCadastro`);
+
+            await new sql.Request(transaction)
+              .input('codigoCadastro', reg.CodigoCadastro)
+              .query(`DELETE FROM INOVAFARMA_DPOPPARA.dbo.Fiscal WHERE CodigoCadastro = @codigoCadastro`);
+
+            await new sql.Request(transaction)
+              .input('codigoCadastro', reg.CodigoCadastro)
+              .query(`DELETE FROM INOVAFARMA_DPOPPARA.dbo.Fornecedor WHERE CodigoCadastro = @codigoCadastro`);
+          }
+
+          const resCli = await new sql.Request(transaction)
+            .input('codigoCliente', reg.CodigoCliente)
+            .query(`DELETE FROM INOVAFARMA_DPOPPARA.dbo.Cliente WHERE CodigoCliente = @codigoCliente`);
+          totalClientesAfetados += resCli.rowsAffected[0] || 0;
+        }
+
+        const resCad = await new sql.Request(transaction)
+          .input('codigoCadastro', reg.CodigoCadastro)
+          .query(`DELETE FROM INOVAFARMA_DPOPPARA.dbo.Cadastro WHERE CodigoCadastro = @codigoCadastro`);
+        totalCadastrosAfetados += resCad.rowsAffected[0] || 0;
       }
-
-      // e) Cadastro
-      const resCad = await new sql.Request(transaction)
-        .input('codigoCadastro', reg.CodigoCadastro)
-        .query(`DELETE FROM INOVAFARMA_DPOPPARA.dbo.Cadastro WHERE CodigoCadastro = @codigoCadastro`);
-      totalCadastrosRemovidos += resCad.rowsAffected[0] || 0;
     }
 
     await transaction.commit();
 
+    const mensagemFinal = estrategia === 'marcar_eliminado'
+      ? `${totalCadastrosAfetados} cadastro(s) marcado(s) como Eliminado com sucesso.`
+      : estrategia === 'forcar_exclusao'
+        ? `Exclusão forçada concluída. ${totalCadastrosAfetados} cadastro(s) removido(s) com todo o histórico.`
+        : `Exclusão em massa concluída. ${totalCadastrosAfetados} cadastro(s) removido(s).`;
+
     return res.json({
-      mensagem: 'Exclusão em massa concluída.',
+      mensagem: mensagemFinal,
       periodo: { dataInicio, dataFim },
       criterioManter: manter,
+      estrategia,
       simulacao: false,
       resumo: {
         totalGruposAfetados: paraManter.length,
-        totalCadastrosExcluidos: totalCadastrosRemovidos,
-        totalClientesExcluidos: totalClientesRemovidos,
+        totalCadastrosAfetados,
+        totalClientesAfetados,
         totalVinculosConvenioRemovidos: totalConveniosRemovidos,
         totalContatosRemovidos,
-        totalPontosRemovidosJuntos: totalPontosRemovidos,
-        totalBloqueadosPorVinculo: naoExcluidosPorVinculo.length,
+        totalPontosRemovidos,
+        totalNaoProcessadosPorVinculo: naoProcessadosPorVinculo.length,
       },
-      registrosExcluidos: aptoParaExcluir.map(r => ({
+      registrosAfetados: aptoParaAgir.map(r => ({
         CodigoCadastro: r.CodigoCadastro,
         CPFCNPJ: r.CPFCNPJ,
         Nome: r.Nome,
@@ -962,7 +1019,7 @@ router.delete('/duplicados/excluir-em-massa', async (req, res) => {
         DataCadastro: r.DataCadastro,
         CodigoCliente: r.CodigoCliente,
       })),
-      naoExcluidosPorVinculo,
+      naoProcessadosPorVinculo,
     });
   } catch (err) {
     if (transaction) {
