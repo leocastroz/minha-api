@@ -1,36 +1,136 @@
 const swaggerUi = require('swagger-ui-express');
 
+const apiPort = process.env.PORT || 4000;
+
+const objectAny = {
+  type: 'object',
+  additionalProperties: true,
+};
+
+const arrayOfObjects = {
+  type: 'array',
+  items: objectAny,
+};
+
+function jsonResponse(description, schema = objectAny) {
+  return {
+    description,
+    content: {
+      'application/json': {
+        schema,
+      },
+    },
+  };
+}
+
+function htmlResponse(description) {
+  return {
+    description,
+    content: {
+      'text/html': {
+        schema: { type: 'string' },
+      },
+    },
+  };
+}
+
+function errorResponse(description = 'Erro') {
+  return jsonResponse(description, { $ref: '#/components/schemas/ErrorResponse' });
+}
+
+function pathParam(name, schema, description) {
+  return {
+    name,
+    in: 'path',
+    required: true,
+    schema,
+    description,
+  };
+}
+
+function queryParam(name, schema, description, required = false) {
+  return {
+    name,
+    in: 'query',
+    required,
+    schema,
+    description,
+  };
+}
+
+function requestBody(schema, required = true) {
+  return {
+    required,
+    content: {
+      'application/json': {
+        schema,
+      },
+    },
+  };
+}
+
+const paginationParams = [
+  queryParam('page', { type: 'integer', default: 1, minimum: 1 }, 'Pagina do resultado.'),
+  queryParam('limit', { type: 'integer', default: 50, minimum: 1 }, 'Quantidade de registros por pagina.'),
+];
+
 const swaggerSpec = {
   openapi: '3.0.3',
   info: {
     title: 'Minha API - Documentacao',
     version: '1.0.0',
     description:
-      'Documentacao dos endpoints disponiveis: metodos HTTP, parametros, payloads e formatos de resposta, pensada para consumo por front-end.',
+      'Documentacao das rotas Express disponiveis neste projeto. A interface Swagger fica em /docs/ e o JSON bruto fica em /docs.json.',
   },
   servers: [
     {
-      url: 'http://localhost:4000',
+      url: `http://localhost:${apiPort}`,
       description: 'Servidor local',
     },
   ],
   tags: [
-    { name: 'Health' },
-    { name: 'Tabelas' },
-    { name: 'Cadastro' },
-    { name: 'Fidelidade Ponto' },
-    { name: 'Fidelidade Premio' },
-    { name: 'Fidelidade Resgate' },
-    { name: 'Vendas' },
+    { name: 'Docs', description: 'Documentacao interativa e spec OpenAPI.' },
+    { name: 'Health', description: 'Status da API e conexao com banco.' },
+    { name: 'Tabelas', description: 'Inspecao de tabelas, colunas e dados.' },
+    { name: 'Cadastro', description: 'Cadastro de pessoas/clientes e rotinas de duplicidade.' },
+    { name: 'Fidelidade Ponto', description: 'Consulta de pontos de fidelidade.' },
+    { name: 'Fidelidade Premio', description: 'CRUD de premios de fidelidade.' },
+    { name: 'Fidelidade Resgate', description: 'Historico de resgates e premios resgatados.' },
+    { name: 'Vendas', description: 'Historico de compras por cliente.' },
   ],
   components: {
     schemas: {
       ErrorResponse: {
         type: 'object',
+        additionalProperties: true,
         properties: {
           error: { type: 'string', example: 'Mensagem de erro' },
           erro: { type: 'string', example: 'Mensagem de erro' },
           mensagem: { type: 'string', example: 'Detalhes do erro' },
+        },
+      },
+      TableItem: {
+        type: 'object',
+        properties: {
+          esquema: { type: 'string', example: 'dbo' },
+          tabela: { type: 'string', example: 'Cadastro' },
+        },
+      },
+      TableColumn: {
+        type: 'object',
+        properties: {
+          coluna: { type: 'string', example: 'CodigoCadastro' },
+          tipo: { type: 'string', example: 'int' },
+          nulo: { type: 'string', example: 'NO' },
+        },
+      },
+      PagedResponse: {
+        type: 'object',
+        properties: {
+          pagina: { type: 'integer', example: 1 },
+          limite: { type: 'integer', example: 50 },
+          total: { type: 'integer', example: 10 },
+          dados: arrayOfObjects,
         },
       },
       CadastroCreateRequest: {
@@ -53,16 +153,16 @@ const swaggerSpec = {
           Eliminado: { type: 'boolean', example: false },
           TipoDescontoNFe: { type: 'integer', example: 1 },
           IdentificacaoEstrangeiro: { type: 'string', nullable: true },
-          vincularConvenioFidelicard: { type: 'boolean', example: true },
-          tituloConvenio: { type: 'string', example: 'FIDELICARD' },
+          vincularConvenioFidelicard: { type: 'boolean', default: true },
+          tituloConvenio: { type: 'string', default: 'FIDELICARD' },
         },
       },
       CadastroUpdateRequest: {
         type: 'object',
         properties: {
-          CodigoEmpresa: { type: 'integer' },
-          CodigoLancamento: { type: 'string' },
-          Nome: { type: 'string' },
+          CodigoEmpresa: { type: 'integer', example: 1 },
+          CodigoLancamento: { type: 'string', example: '1001' },
+          Nome: { type: 'string', example: 'LEONARDO' },
           NomeFantasia: { type: 'string', nullable: true },
           CPFCNPJ: { type: 'string', nullable: true },
           RG: { type: 'string', nullable: true },
@@ -79,41 +179,30 @@ const swaggerSpec = {
           IdentificacaoEstrangeiro: { type: 'string', nullable: true },
         },
       },
-      PagedResponse: {
+      CadastroDuplicadosDeleteRequest: {
         type: 'object',
+        required: ['dataInicio', 'dataFim'],
         properties: {
-          pagina: { type: 'integer', example: 1 },
-          limite: { type: 'integer', example: 50 },
-          total: { type: 'integer', example: 10 },
-          dados: {
-            type: 'array',
-            items: { type: 'object', additionalProperties: true },
+          dataInicio: { type: 'string', format: 'date', example: '2025-01-01' },
+          dataFim: { type: 'string', format: 'date', example: '2025-12-31' },
+          manter: {
+            type: 'string',
+            enum: ['mais_antigo', 'mais_recente'],
+            default: 'mais_antigo',
           },
-        },
-      },
-      ClienteMini: {
-        type: 'object',
-        properties: {
-          codigoCliente: { type: 'integer', nullable: true, example: 18027401 },
-          codigoCadastro: { type: 'integer', example: 180430901 },
-          nomeCompleto: { type: 'string', example: 'LEONARDO SILVA CASTRO' },
-          cpfCnpj: { type: 'string', nullable: true, example: '04563315222' },
-          tipoPessoa: { type: 'string', example: 'Física' },
-          ativo: { type: 'boolean', example: true },
-        },
-      },
-      ErroPadrao: {
-        type: 'object',
-        properties: {
-          erro: { type: 'string', example: 'Erro ao consultar dados' },
-          mensagem: { type: 'string', example: 'Detalhes do erro' },
+          estrategia: {
+            type: 'string',
+            enum: ['excluir', 'marcar_eliminado', 'forcar_exclusao'],
+            default: 'excluir',
+          },
+          apenasSimular: { type: 'boolean', default: false },
         },
       },
       FidelidadePremioItem: {
         type: 'object',
         properties: {
           codigoPremio: { type: 'integer', example: 1 },
-          nomePremio: { type: 'string', example: 'Desconto na próxima compra' },
+          nomePremio: { type: 'string', example: 'Desconto na proxima compra' },
           pontos: { type: 'integer', example: 1000 },
           ativo: { type: 'boolean', example: true },
         },
@@ -122,23 +211,23 @@ const swaggerSpec = {
         type: 'object',
         required: ['nomePremio'],
         properties: {
-          nomePremio: { type: 'string', example: 'Desconto na próxima compra' },
-          pontos: { type: 'integer', example: 1000 },
-          ativo: { type: 'boolean', example: true },
+          nomePremio: { type: 'string', example: 'Desconto na proxima compra' },
+          pontos: { type: 'number', example: 1000 },
+          ativo: { type: 'boolean', default: true },
         },
       },
       FidelidadePremioUpdateRequest: {
         type: 'object',
         properties: {
-          nomePremio: { type: 'string', example: 'Desconto na próxima compra' },
-          pontos: { type: 'integer', example: 1000 },
+          nomePremio: { type: 'string', example: 'Desconto na proxima compra' },
+          pontos: { type: 'number', example: 1000 },
           ativo: { type: 'boolean', example: true },
         },
       },
       FidelidadePremioListResponse: {
         type: 'object',
         properties: {
-          mensagem: { type: 'string', example: 'Prêmios consultados com sucesso' },
+          mensagem: { type: 'string', example: 'Premios consultados com sucesso' },
           total: { type: 'integer', example: 3 },
           premios: {
             type: 'array',
@@ -146,315 +235,99 @@ const swaggerSpec = {
           },
         },
       },
-      FidelidadePontoItem: {
+      ClienteMini: {
         type: 'object',
         properties: {
-          codigoFidelidade: { type: 'integer', example: 123 },
-          codigoLancamento: { type: 'integer', example: 456 },
-          pontos: { type: 'integer', example: 250 },
-          saldo: { type: 'integer', example: 150 },
-          status: { type: 'string', example: 'DISPONÍVEL' },
-          diasParaExpirar: { type: 'integer', example: 30 },
-          dataVencimento: { type: 'string', format: 'date-time' },
+          codigoCliente: { type: 'integer', nullable: true, example: 123 },
+          codigoCadastro: { type: 'integer', example: 456 },
+          nomeCompleto: { type: 'string', example: 'LEONARDO SILVA' },
+          cpfCnpj: { type: 'string', nullable: true, example: '12345678901' },
+          tipoPessoa: { type: 'string', example: 'Fisica' },
+          ativo: { type: 'boolean', nullable: true, example: true },
         },
       },
       FidelidadePontoResponse: {
         type: 'object',
         properties: {
-          mensagem: { type: 'string', example: 'Pontos de fidelidade consultados com sucesso' },
-          cadastro: { $ref: '#/components/schemas/ClienteMini' },
-          resumoPontos: {
-            type: 'object',
-            properties: {
-              totalPontosAcumulados: { type: 'integer', example: 1500 },
-              totalSaldoDisponivel: { type: 'integer', example: 700 },
-              totalSaldoAtivo: { type: 'integer', example: 700 },
-              totalPontosUtilizados: { type: 'integer', example: 800 },
-              totalTransacoes: { type: 'integer', example: 12 },
-              transacoesAtivas: { type: 'integer', example: 5 },
-              transacoesExpiradas: { type: 'integer', example: 2 },
-            },
-          },
-          pontos: {
-            type: 'array',
-            items: { $ref: '#/components/schemas/FidelidadePontoItem' },
-          },
-          filtros: {
-            type: 'object',
-            properties: {
-              incluirExpirados: { type: 'string', example: 'SIM' },
-              ordenarPor: { type: 'string', example: 'data' },
-              limite: { type: 'integer', example: 100 },
-            },
-          },
-        },
-      },
-      FidelidadePontoResumoResponse: {
-        type: 'object',
-        properties: {
-          mensagem: { type: 'string', example: 'Resumo de pontos consultado com sucesso' },
-          cliente: { type: 'string', example: 'LEONARDO SILVA CASTRO' },
-          resumo: {
-            type: 'object',
-            properties: {
-              totalPontosAcumulados: { type: 'integer', example: 1500 },
-              totalSaldoDisponivel: { type: 'integer', example: 700 },
-              totalTransacoes: { type: 'integer', example: 12 },
-            },
-          },
-        },
-      },
-      VendasClienteItem: {
-        type: 'object',
-        properties: {
-          codigoVenda: { type: 'string', example: '12484001' },
-          dataVenda: { type: 'string', format: 'date-time' },
-          status: { type: 'integer', example: 0 },
-          eliminado: { type: 'boolean', example: false },
-          totalBruto: { type: 'number', format: 'float', example: 385.87 },
-          totalDesconto: { type: 'number', format: 'float', example: 0 },
-          totalLiquido: { type: 'number', format: 'float', example: 385.87 },
-          vendedor: {
-            type: 'object',
-            properties: {
-              codigoFuncionario: { type: 'integer', nullable: true, example: 1101 },
-              nomeFuncionario: { type: 'string', nullable: true, example: 'EZEQUIAS' },
-            },
-          },
-          convenio: {
-            type: 'object',
-            properties: {
-              codigoConvenio: { type: 'integer', nullable: true, example: 301 },
-              nomeConvenio: { type: 'string', nullable: true, example: 'FIDELICARD' },
-            },
-          },
-          formaPagamento: {
-            type: 'object',
-            properties: {
-              codigoFormaPagamento: { type: 'integer', nullable: true, example: 4 },
-              nomeFormaPagamento: { type: 'string', nullable: true, example: 'Prazo' },
-            },
-          },
-          auditoria: {
-            type: 'object',
-            properties: {
-              codigoLancamento: { type: 'string', nullable: true, example: '227354701' },
-              dataLancamento: { type: 'string', format: 'date-time', nullable: true },
-              codigoUsuario: { type: 'integer', nullable: true, example: 101 },
-              nomeUsuario: { type: 'string', nullable: true, example: 'VENDAS' },
-              codigoEstacao: { type: 'string', nullable: true, example: '4101' },
-            },
-          },
-          itens: {
-            type: 'array',
-            items: {
-              type: 'object',
-              properties: {
-                codigoVendaID: { type: 'string', example: '36112601' },
-                codigoProduto: { type: 'integer', example: 1883001 },
-                nomeProduto: { type: 'string', example: 'NEOSALDINA C/10 DRG' },
-                quantidade: { type: 'number', example: 1 },
-                precoUnitario: { type: 'number', example: 18.9 },
-                descontoUnitario: { type: 'number', example: 0 },
-                totalItem: { type: 'number', example: 18.9 },
-                totalDescontoItem: { type: 'number', example: 0 },
-                estoqueAtual: { type: 'number', example: 31 },
-                precoTabelaAtual: { type: 'number', example: 17.04 },
-                precoPromocionalAtual: { type: 'number', example: 0 },
-                produtoAtivoNoEstoque: { type: 'boolean', nullable: true, example: true },
-              },
-            },
-          },
-        },
-      },
-      VendasClienteResponse: {
-        type: 'object',
-        properties: {
-          mensagem: { type: 'string', example: 'Compras do cliente consultadas com sucesso' },
-          cliente: {
-            type: 'object',
-            properties: {
-              codigoCliente: { type: 'integer', nullable: true, example: 18027401 },
-              codigoCadastro: { type: 'integer', example: 180430901 },
-              nomeCompleto: { type: 'string', example: 'LEONARDO SILVA CASTRO' },
-              cpfCnpj: { type: 'string', example: '04563315222' },
-              tipoPessoa: { type: 'string', example: 'Física' },
-              clienteAtivo: { type: 'boolean', example: true },
-            },
-          },
-          relacionamentosUtilizados: {
-            type: 'array',
-            items: { type: 'string' },
-          },
-          resumo: {
-            type: 'object',
-            properties: {
-              totalVendas: { type: 'integer', example: 2 },
-              totalBruto: { type: 'number', example: 754.77 },
-              totalDesconto: { type: 'number', example: 0 },
-              totalLiquido: { type: 'number', example: 754.77 },
-              dataUltimaCompra: { type: 'string', format: 'date-time' },
-              dataPrimeiraCompra: { type: 'string', format: 'date-time' },
-              totalEmpresas: { type: 'integer', example: 1 },
-              totalFuncionarios: { type: 'integer', example: 2 },
-            },
-          },
-          paginacao: {
-            type: 'object',
-            properties: {
-              pagina: { type: 'integer', example: 1 },
-              limite: { type: 'integer', example: 20 },
-              vendasNaPagina: { type: 'integer', example: 2 },
-              incluirEliminadas: { type: 'boolean', example: false },
-            },
-          },
-          vendas: {
-            type: 'array',
-            items: { $ref: '#/components/schemas/VendasClienteItem' },
-          },
-        },
-      },
-      FidelidadeResgatePremioItem: {
-        type: 'object',
-        properties: {
-          codigoPremio: { type: 'integer', example: 1 },
-          nomePremio: { type: 'string', example: 'Desconto na próxima compra' },
-          pontos: { type: 'integer', example: 100 },
-          quantidade: { type: 'integer', example: 1 },
-          total: { type: 'integer', example: 100 },
-          premioAtivo: { type: 'boolean', example: true },
-        },
-      },
-      FidelidadeResgateItem: {
-        type: 'object',
-        properties: {
-          codigoResgate: { type: 'integer', example: 10 },
-          codigoLancamento: { type: 'integer', example: 50001 },
-          dataLancamento: { type: 'string', format: 'date-time' },
-          pontosResgate: { type: 'integer', example: 200 },
-          observacao: { type: 'string', nullable: true, example: 'Resgate parcial' },
-          auditoria: {
-            type: 'object',
-            properties: {
-              codigoEstacao: { type: 'integer', nullable: true, example: 1 },
-            },
-          },
-          premios: {
-            type: 'array',
-            items: { $ref: '#/components/schemas/FidelidadeResgatePremioItem' },
-          },
-          origemPontos: {
-            type: 'array',
-            nullable: true,
-            items: {
-              type: 'object',
-              properties: {
-                codigoFidelidade: { type: 'integer', example: 99 },
-                descricaoFidelidade: { type: 'string', example: 'Fidelidade Cliente' },
-                pontosUtilizados: { type: 'integer', example: 200 },
-                dataOrigem: { type: 'string', format: 'date-time' },
-              },
-            },
-          },
-          vinculoComercial: {
-            type: 'array',
-            nullable: true,
-            items: {
-              type: 'object',
-              properties: {
-                codigoVenda: { type: 'string', example: '9001' },
-                dataVenda: { type: 'string', format: 'date-time' },
-                totalVenda: { type: 'number', example: 299.9 },
-                descricaoVenda: { type: 'string', nullable: true },
-              },
-            },
-          },
+          mensagem: { type: 'string' },
+          cadastro: objectAny,
+          resumoPontos: objectAny,
+          pontos: arrayOfObjects,
+          filtros: objectAny,
         },
       },
       FidelidadeResgateResponse: {
         type: 'object',
         properties: {
-          mensagem: { type: 'string', example: 'Resgates de fidelidade consultados com sucesso' },
-          cliente: {
-            type: 'object',
-            properties: {
-              codigoCliente: { type: 'integer', nullable: true, example: 18027401 },
-              codigoCadastro: { type: 'integer', example: 180430901 },
-              nome: { type: 'string', example: 'LEONARDO SILVA CASTRO' },
-              cpfCnpj: { type: 'string', nullable: true, example: '04563315222' },
-              tipoPessoa: { type: 'string', example: 'Física' },
-              ativo: { type: 'boolean', example: true },
-            },
-          },
-          resumo: {
-            type: 'object',
-            properties: {
-              totalResgates: { type: 'integer', example: 2 },
-              totalPontosResgatados: { type: 'integer', example: 450 },
-              totalPremios: { type: 'integer', example: 3 },
-              periodoAnalisado: {
-                type: 'object',
-                properties: {
-                  inicio: { type: 'string', format: 'date-time' },
-                  fim: { type: 'string', format: 'date-time' },
-                },
-              },
-            },
-          },
-          resgates: {
+          mensagem: { type: 'string' },
+          cliente: objectAny,
+          resumo: objectAny,
+          resgates: arrayOfObjects,
+        },
+      },
+      FidelidadeResgatePremiosResponse: {
+        type: 'object',
+        properties: {
+          mensagem: { type: 'string' },
+          cliente: objectAny,
+          resumo: objectAny,
+          premios: arrayOfObjects,
+        },
+      },
+      VendasClienteResponse: {
+        type: 'object',
+        properties: {
+          mensagem: { type: 'string' },
+          cliente: objectAny,
+          relacionamentosUtilizados: {
             type: 'array',
-            items: { $ref: '#/components/schemas/FidelidadeResgateItem' },
+            items: { type: 'string' },
           },
+          resumo: objectAny,
+          paginacao: objectAny,
+          vendas: arrayOfObjects,
         },
       },
     },
   },
   paths: {
+    '/docs/': {
+      get: {
+        tags: ['Docs'],
+        summary: 'Exibe a interface Swagger UI',
+        responses: {
+          200: htmlResponse('HTML da documentacao Swagger.'),
+        },
+      },
+    },
+    '/docs.json': {
+      get: {
+        tags: ['Docs'],
+        summary: 'Retorna o spec OpenAPI em JSON',
+        responses: {
+          200: jsonResponse('Spec OpenAPI utilizado pelo Swagger UI.', objectAny),
+        },
+      },
+    },
     '/health': {
       get: {
         tags: ['Health'],
-        summary: 'Health check da API e banco',
+        summary: 'Verifica status da API e conexao com banco',
         responses: {
-          200: {
-            description: 'API e banco conectados',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  properties: {
-                    status: { type: 'string', example: 'ok' },
-                    banco: { type: 'string', example: 'conectado' },
-                  },
-                },
-              },
+          200: jsonResponse('API e banco conectados.', {
+            type: 'object',
+            properties: {
+              status: { type: 'string', example: 'ok' },
+              banco: { type: 'string', example: 'conectado' },
             },
-          },
-          500: {
-            description: 'Falha de conexao com banco',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  properties: {
-                    status: { type: 'string', example: 'erro' },
-                    banco: { type: 'string', example: 'desconectado' },
-                  },
-                },
-              },
+          }),
+          500: jsonResponse('Falha de conexao com banco.', {
+            type: 'object',
+            properties: {
+              status: { type: 'string', example: 'erro' },
+              banco: { type: 'string', example: 'desconectado' },
             },
-          },
-          pontosOrigemCliente: {
-            type: 'array',
-            items: {
-              type: 'object',
-              properties: {
-                codigoFidelidade: { type: 'integer', example: 1912601 },
-                dataVencimento: { type: 'string', format: 'date-time' },
-                pontosOrigem: { type: 'integer', example: 2000 },
-                saldoOrigem: { type: 'integer', example: 24 },
-              },
-            },
-          },
+          }),
         },
       },
     },
@@ -463,23 +336,11 @@ const swaggerSpec = {
         tags: ['Tabelas'],
         summary: 'Lista todas as tabelas do banco',
         responses: {
-          200: {
-            description: 'Lista de tabelas',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'array',
-                  items: {
-                    type: 'object',
-                    properties: {
-                      esquema: { type: 'string', example: 'dbo' },
-                      tabela: { type: 'string', example: 'Cadastro' },
-                    },
-                  },
-                },
-              },
-            },
-          },
+          200: jsonResponse('Lista de tabelas.', {
+            type: 'array',
+            items: { $ref: '#/components/schemas/TableItem' },
+          }),
+          500: errorResponse('Erro interno.'),
         },
       },
     },
@@ -488,262 +349,136 @@ const swaggerSpec = {
         tags: ['Tabelas'],
         summary: 'Lista colunas de uma tabela',
         parameters: [
-          {
-            name: 'nome',
-            in: 'path',
-            required: true,
-            schema: { type: 'string' },
-          },
+          pathParam('nome', { type: 'string', example: 'Cadastro' }, 'Nome da tabela.'),
         ],
         responses: {
-          200: {
-            description: 'Lista de colunas',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'array',
-                  items: {
-                    type: 'object',
-                    properties: {
-                      coluna: { type: 'string', example: 'CodigoCadastro' },
-                      tipo: { type: 'string', example: 'int' },
-                      nulo: { type: 'string', example: 'NO' },
-                    },
-                  },
-                },
-              },
-            },
-          },
+          200: jsonResponse('Lista de colunas.', {
+            type: 'array',
+            items: { $ref: '#/components/schemas/TableColumn' },
+          }),
+          500: errorResponse('Erro interno.'),
         },
       },
     },
     '/tabelas/{nome}/dados': {
       get: {
         tags: ['Tabelas'],
-        summary: 'Consulta dados de uma tabela com paginacao',
+        summary: 'Lista dados de uma tabela com paginacao',
         parameters: [
-          {
-            name: 'nome',
-            in: 'path',
-            required: true,
-            schema: { type: 'string' },
-          },
-          { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
-          { name: 'limit', in: 'query', schema: { type: 'integer', default: 50 } },
+          pathParam('nome', { type: 'string', example: 'Cadastro' }, 'Nome da tabela.'),
+          ...paginationParams,
         ],
         responses: {
-          200: {
-            description: 'Dados paginados',
-            content: {
-              'application/json': {
-                schema: { $ref: '#/components/schemas/PagedResponse' },
-              },
-            },
-          },
-          404: {
-            description: 'Tabela nao encontrada',
-            content: {
-              'application/json': {
-                schema: { $ref: '#/components/schemas/ErrorResponse' },
-              },
-            },
-          },
+          200: jsonResponse('Dados paginados da tabela.', { $ref: '#/components/schemas/PagedResponse' }),
+          404: errorResponse('Tabela nao encontrada.'),
+          500: errorResponse('Erro interno.'),
         },
       },
     },
     '/tabelas/cadastro/diagnostico': {
       get: {
         tags: ['Tabelas'],
-        summary: 'Diagnostico de relacionamentos por cadastro',
+        summary: 'Diagnostica relacionamentos de um cadastro',
         parameters: [
-          { name: 'codigoCadastro', in: 'query', required: true, schema: { type: 'integer' } },
-          { name: 'compararCodigoCadastro', in: 'query', schema: { type: 'integer' } },
-          { name: 'sample', in: 'query', schema: { type: 'integer', default: 5 } },
-          { name: 'scanLimit', in: 'query', schema: { type: 'integer', default: 200 } },
+          queryParam('codigoCadastro', { type: 'integer', example: 180681501 }, 'CodigoCadastro analisado.', true),
+          queryParam('compararCodigoCadastro', { type: 'integer', example: 180681601 }, 'Cadastro opcional para comparacao.'),
+          queryParam('sample', { type: 'integer', default: 5 }, 'Quantidade de exemplos por ocorrencia.'),
+          queryParam('scanLimit', { type: 'integer', default: 200 }, 'Limite de colunas/tabelas inspecionadas.'),
         ],
         responses: {
-          200: {
-            description: 'Diagnostico concluido',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  additionalProperties: true,
-                },
-              },
-            },
-          },
-          400: {
-            description: 'Parametro invalido',
-            content: {
-              'application/json': {
-                schema: { $ref: '#/components/schemas/ErrorResponse' },
-              },
-            },
-          },
+          200: jsonResponse('Diagnostico concluido.', objectAny),
+          400: errorResponse('Parametro invalido.'),
+          404: errorResponse('Cadastro nao encontrado.'),
+          500: errorResponse('Erro interno.'),
         },
       },
     },
     '/tabelas/cadastro/varredura-geral': {
       get: {
         tags: ['Tabelas'],
-        summary: 'Varredura geral de ocorrencias de dados do cadastro',
+        summary: 'Faz varredura geral por ocorrencias de um cadastro',
         parameters: [
-          { name: 'codigoCadastro', in: 'query', required: true, schema: { type: 'integer' } },
-          { name: 'sample', in: 'query', schema: { type: 'integer', default: 3 } },
-          { name: 'tableLimit', in: 'query', schema: { type: 'integer', default: 0 } },
+          queryParam('codigoCadastro', { type: 'integer', example: 180430901 }, 'CodigoCadastro analisado.', true),
+          queryParam('sample', { type: 'integer', default: 3 }, 'Quantidade de exemplos por ocorrencia.'),
+          queryParam('tableLimit', { type: 'integer', default: 0 }, 'Limite de tabelas; 0 analisa todas.'),
         ],
         responses: {
-          200: {
-            description: 'Varredura concluida',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  additionalProperties: true,
-                },
-              },
-            },
-          },
+          200: jsonResponse('Varredura concluida.', objectAny),
+          400: errorResponse('Parametro invalido.'),
+          404: errorResponse('Cadastro nao encontrado.'),
+          500: errorResponse('Erro interno.'),
         },
       },
     },
     '/cadastro': {
       get: {
         tags: ['Cadastro'],
-        summary: 'Lista cadastros com paginacao',
+        summary: 'Lista cadastros com filtros opcionais',
         parameters: [
-          { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
-          { name: 'limit', in: 'query', schema: { type: 'integer', default: 50 } },
-          { name: 'nome', in: 'query', schema: { type: 'string' } },
+          ...paginationParams,
+          queryParam('nome', { type: 'string', example: 'FRANCISCA' }, 'Filtro por nome.'),
+          queryParam('CPFCNPJ', { type: 'string', example: '12345678900' }, 'Filtro por CPF/CNPJ.'),
+          queryParam('cpfcnpj', { type: 'string', example: '12345678900' }, 'Alias minusculo para CPF/CNPJ.'),
         ],
         responses: {
-          200: {
-            description: 'Cadastros paginados',
-            content: {
-              'application/json': {
-                schema: { $ref: '#/components/schemas/PagedResponse' },
-              },
-            },
-          },
+          200: jsonResponse('Cadastros paginados.', { $ref: '#/components/schemas/PagedResponse' }),
+          500: errorResponse('Erro interno.'),
         },
       },
       post: {
         tags: ['Cadastro'],
-        summary: 'Cria novo cadastro',
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: { $ref: '#/components/schemas/CadastroCreateRequest' },
-            },
-          },
-        },
+        summary: 'Cria cadastro e vincula cliente/convenio quando solicitado',
+        requestBody: requestBody({ $ref: '#/components/schemas/CadastroCreateRequest' }),
         responses: {
-          201: {
-            description: 'Cadastro criado',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  additionalProperties: true,
-                },
-              },
-            },
-          },
-          400: {
-            description: 'Payload invalido',
-            content: {
-              'application/json': {
-                schema: { $ref: '#/components/schemas/ErrorResponse' },
-              },
-            },
-          },
-        },
-      },
-    },
-    '/cadastro/duplicados': {
-      get: {
-        tags: ['Cadastro'],
-        summary: 'Lista cadastros com CPF/CNPJ duplicado',
-        description: 'Retorna todos os grupos de cadastros que possuem o mesmo CPFCNPJ, agrupados por CPF/CNPJ. Útil para identificar e tratar duplicidades antes de deletar registros.',
-        parameters: [
-          { name: 'page', in: 'query', schema: { type: 'integer', default: 1 }, description: 'Página dos grupos duplicados' },
-          { name: 'limit', in: 'query', schema: { type: 'integer', default: 50 }, description: 'Quantidade de grupos por página' },
-        ],
-        responses: {
-          200: {
-            description: 'Grupos de cadastros duplicados',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  properties: {
-                    pagina: { type: 'integer', example: 1 },
-                    limite: { type: 'integer', example: 50 },
-                    totalGruposDuplicados: { type: 'integer', example: 12 },
-                    totalNestaPagina: { type: 'integer', example: 12 },
-                    duplicados: {
-                      type: 'array',
-                      items: {
-                        type: 'object',
-                        properties: {
-                          CPFCNPJ: { type: 'string', example: '12345678900' },
-                          quantidade: { type: 'integer', example: 2 },
-                          cadastros: {
-                            type: 'array',
-                            items: {
-                              type: 'object',
-                              properties: {
-                                CodigoCadastro: { type: 'integer', example: 100 },
-                                CodigoEmpresa: { type: 'integer', example: 1 },
-                                CodigoLancamento: { type: 'string', example: '101' },
-                                Nome: { type: 'string', example: 'JOÃO SILVA' },
-                                SobreNome: { type: 'string', nullable: true, example: 'SILVA' },
-                                DataNascimento: { type: 'string', format: 'date-time', nullable: true },
-                                DataCadastro: { type: 'string', format: 'date-time', nullable: true },
-                                Eliminado: { type: 'boolean', example: false },
-                                CodigoCliente: { type: 'integer', nullable: true, example: 55 },
-                              },
-                            },
-                          },
-                        },
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-          500: {
-            description: 'Erro interno',
-            content: {
-              'application/json': {
-                schema: { $ref: '#/components/schemas/ErrorResponse' },
-              },
-            },
-          },
+          201: jsonResponse('Cadastro criado com sucesso.', objectAny),
+          400: errorResponse('Payload invalido.'),
+          500: errorResponse('Erro interno.'),
         },
       },
     },
     '/cadastro/com-convenio': {
       get: {
         tags: ['Cadastro'],
-        summary: 'Lista clientes com convenio por titulo',
+        summary: 'Lista clientes vinculados a um convenio por titulo',
         parameters: [
-          { name: 'titulo', in: 'query', schema: { type: 'string', default: 'FIDELICARD' } },
-          { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
-          { name: 'limit', in: 'query', schema: { type: 'integer', default: 50 } },
+          queryParam('titulo', { type: 'string', default: 'FIDELICARD' }, 'Titulo ou parte do nome do convenio.'),
+          ...paginationParams,
         ],
         responses: {
-          200: {
-            description: 'Clientes com convenio paginados',
-            content: {
-              'application/json': {
-                schema: { $ref: '#/components/schemas/PagedResponse' },
-              },
-            },
-          },
+          200: jsonResponse('Clientes com convenio paginados.', { $ref: '#/components/schemas/PagedResponse' }),
+          500: errorResponse('Erro interno.'),
+        },
+      },
+    },
+    '/cadastro/duplicados': {
+      get: {
+        tags: ['Cadastro'],
+        summary: 'Lista CPF/CNPJ duplicados',
+        parameters: [
+          ...paginationParams,
+          queryParam('comPontosValidos', { type: 'boolean', default: false }, 'Retorna somente grupos com saldo de pontos valido.'),
+          queryParam('dataInicio', { type: 'string', format: 'date', example: '2025-01-01' }, 'Data inicial de DataCadastro.'),
+          queryParam('dataFim', { type: 'string', format: 'date', example: '2025-12-31' }, 'Data final de DataCadastro.'),
+          queryParam('incluirEliminados', { type: 'boolean', default: false }, 'Inclui registros com Eliminado=1.'),
+        ],
+        responses: {
+          200: jsonResponse('Grupos duplicados retornados.', objectAny),
+          400: errorResponse('Filtro invalido.'),
+          500: errorResponse('Erro interno.'),
+        },
+      },
+    },
+    '/cadastro/duplicados/excluir-em-massa': {
+      delete: {
+        tags: ['Cadastro'],
+        summary: 'Exclui ou marca como eliminado cadastros duplicados em massa',
+        description:
+          'Use apenasSimular=true para fazer dry-run. A estrategia forcar_exclusao remove tambem historico relacionado previsto no codigo.',
+        requestBody: requestBody({ $ref: '#/components/schemas/CadastroDuplicadosDeleteRequest' }),
+        responses: {
+          200: jsonResponse('Operacao executada ou simulada.', objectAny),
+          400: errorResponse('Payload invalido.'),
+          500: errorResponse('Erro interno.'),
         },
       },
     },
@@ -752,248 +487,90 @@ const swaggerSpec = {
         tags: ['Cadastro'],
         summary: 'Busca cadastro por CodigoCadastro',
         parameters: [
-          {
-            name: 'codigo',
-            in: 'path',
-            required: true,
-            schema: { type: 'integer' },
-          },
+          pathParam('codigo', { type: 'integer', example: 180430901 }, 'CodigoCadastro.'),
         ],
         responses: {
-          200: {
-            description: 'Cadastro encontrado',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  additionalProperties: true,
-                },
-              },
-            },
-          },
-          404: {
-            description: 'Cadastro nao encontrado',
-            content: {
-              'application/json': {
-                schema: { $ref: '#/components/schemas/ErrorResponse' },
-              },
-            },
-          },
+          200: jsonResponse('Cadastro encontrado.', objectAny),
+          400: errorResponse('CodigoCadastro invalido.'),
+          404: errorResponse('Cadastro nao encontrado.'),
+          500: errorResponse('Erro interno.'),
         },
       },
       put: {
         tags: ['Cadastro'],
-        summary: 'Atualiza todos os campos editaveis do cadastro',
+        summary: 'Atualiza todos os campos editaveis de um cadastro',
+        description: 'No PUT, o codigo exige todos os campos editaveis definidos em CAMPOS_EDITAVEIS.',
         parameters: [
-          {
-            name: 'codigo',
-            in: 'path',
-            required: true,
-            schema: { type: 'integer' },
-          },
+          pathParam('codigo', { type: 'integer', example: 180430901 }, 'CodigoCadastro.'),
         ],
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: { $ref: '#/components/schemas/CadastroUpdateRequest' },
-            },
-          },
-        },
+        requestBody: requestBody({ $ref: '#/components/schemas/CadastroUpdateRequest' }),
         responses: {
-          200: {
-            description: 'Cadastro atualizado com PUT',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  properties: {
-                    mensagem: { type: 'string' },
-                    dados: { type: 'object', additionalProperties: true },
-                  },
-                },
-              },
-            },
-          },
-          400: {
-            description: 'Payload invalido no PUT',
-            content: {
-              'application/json': {
-                schema: { $ref: '#/components/schemas/ErrorResponse' },
-              },
-            },
-          },
+          200: jsonResponse('Cadastro atualizado com PUT.', objectAny),
+          400: errorResponse('Payload ou codigo invalido.'),
+          404: errorResponse('Cadastro nao encontrado.'),
+          500: errorResponse('Erro interno.'),
         },
       },
       patch: {
         tags: ['Cadastro'],
-        summary: 'Atualiza parcialmente campos do cadastro',
+        summary: 'Atualiza parcialmente campos editaveis de um cadastro',
         parameters: [
-          {
-            name: 'codigo',
-            in: 'path',
-            required: true,
-            schema: { type: 'integer' },
-          },
+          pathParam('codigo', { type: 'integer', example: 180430901 }, 'CodigoCadastro.'),
         ],
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: { $ref: '#/components/schemas/CadastroUpdateRequest' },
-            },
-          },
-        },
+        requestBody: requestBody({ $ref: '#/components/schemas/CadastroUpdateRequest' }),
         responses: {
-          200: {
-            description: 'Cadastro atualizado com PATCH',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  properties: {
-                    mensagem: { type: 'string' },
-                    dados: { type: 'object', additionalProperties: true },
-                  },
-                },
-              },
-            },
-          },
+          200: jsonResponse('Cadastro atualizado com PATCH.', objectAny),
+          400: errorResponse('Payload ou codigo invalido.'),
+          404: errorResponse('Cadastro nao encontrado.'),
+          500: errorResponse('Erro interno.'),
         },
       },
       delete: {
         tags: ['Cadastro'],
-        summary: 'Deleta um cadastro pelo CodigoCadastro',
-        description: 'Remove permanentemente um cadastro. Se o cadastro possuir vínculo ativo na tabela Cliente, a deleção é bloqueada (409). Nesse caso, utilize PATCH com `Eliminado: true` para inativar o registro.',
+        summary: 'Deleta cadastro por CodigoCadastro',
+        description:
+          'Remove vinculos de Cliente_Convenio e Cliente antes de remover o Cadastro, conforme implementado na rota.',
         parameters: [
-          {
-            name: 'codigo',
-            in: 'path',
-            required: true,
-            schema: { type: 'integer' },
-            description: 'CodigoCadastro do registro a ser deletado',
-          },
+          pathParam('codigo', { type: 'integer', example: 180430901 }, 'CodigoCadastro.'),
         ],
         responses: {
-          200: {
-            description: 'Cadastro deletado com sucesso',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  properties: {
-                    mensagem: { type: 'string', example: 'Cadastro deletado com sucesso.' },
-                    cadastroDeletado: {
-                      type: 'object',
-                      properties: {
-                        CodigoCadastro: { type: 'integer', example: 200 },
-                        Nome: { type: 'string', example: 'JOÃO SILVA' },
-                        CPFCNPJ: { type: 'string', example: '12345678900' },
-                        CodigoCliente: { type: 'integer', nullable: true, example: null },
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-          400: {
-            description: 'CodigoCadastro inválido',
-            content: {
-              'application/json': {
-                schema: { $ref: '#/components/schemas/ErrorResponse' },
-              },
-            },
-          },
-          404: {
-            description: 'Cadastro não encontrado',
-            content: {
-              'application/json': {
-                schema: { $ref: '#/components/schemas/ErrorResponse' },
-              },
-            },
-          },
-          409: {
-            description: 'Cadastro possui vínculo em Cliente — deleção bloqueada',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  properties: {
-                    error: { type: 'string', example: 'Este cadastro possui vínculo ativo na tabela Cliente e não pode ser deletado diretamente.' },
-                    dica: { type: 'string', example: 'Para remover um duplicado vinculado a um cliente, utilize o campo Eliminado=true via PATCH para inativá-lo, ou remova o vínculo de Cliente antes de deletar.' },
-                    cadastro: { type: 'object', additionalProperties: true },
-                  },
-                },
-              },
-            },
-          },
-          500: {
-            description: 'Erro interno',
-            content: {
-              'application/json': {
-                schema: { $ref: '#/components/schemas/ErrorResponse' },
-              },
-            },
-          },
+          200: jsonResponse('Cadastro deletado com sucesso.', objectAny),
+          400: errorResponse('CodigoCadastro invalido.'),
+          404: errorResponse('Cadastro nao encontrado.'),
+          500: errorResponse('Erro interno.'),
         },
       },
     },
     '/fidelidade-ponto/{codigoCadastro}': {
       get: {
         tags: ['Fidelidade Ponto'],
-        summary: 'Consulta pontos de fidelidade por CodigoCadastro',
+        summary: 'Consulta pontos por CodigoCadastro',
         parameters: [
-          { name: 'codigoCadastro', in: 'path', required: true, schema: { type: 'integer' } },
-          { name: 'incluirExpirados', in: 'query', schema: { type: 'boolean', default: true } },
-          { name: 'orderBy', in: 'query', schema: { type: 'string', enum: ['data', 'saldo'], default: 'data' } },
-          { name: 'limit', in: 'query', schema: { type: 'integer', default: 100 } },
+          pathParam('codigoCadastro', { type: 'integer', example: 180430901 }, 'CodigoCadastro.'),
+          queryParam('incluirExpirados', { type: 'boolean', default: true }, 'Inclui pontos com saldo 0/expirados.'),
+          queryParam('orderBy', { type: 'string', enum: ['data', 'saldo'], default: 'data' }, 'Campo usado na ordenacao.'),
+          queryParam('limit', { type: 'integer', default: 100, maximum: 1000 }, 'Limite de registros.'),
         ],
         responses: {
-          200: {
-            description: 'Pontos consultados',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  additionalProperties: true,
-                },
-              },
-            },
-          },
+          200: jsonResponse('Pontos consultados.', { $ref: '#/components/schemas/FidelidadePontoResponse' }),
+          400: errorResponse('CodigoCadastro invalido.'),
+          404: errorResponse('Cadastro nao encontrado.'),
+          500: errorResponse('Erro interno.'),
         },
       },
     },
     '/fidelidade-ponto/{codigoCadastro}/resumo': {
       get: {
         tags: ['Fidelidade Ponto'],
-        summary: 'Resumo de pontos por CodigoCadastro',
+        summary: 'Consulta resumo de pontos por CodigoCadastro',
         parameters: [
-          { name: 'codigoCadastro', in: 'path', required: true, schema: { type: 'integer' } },
+          pathParam('codigoCadastro', { type: 'integer', example: 180430901 }, 'CodigoCadastro.'),
         ],
         responses: {
-          200: {
-            description: 'Resumo retornado',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  properties: {
-                    mensagem: { type: 'string' },
-                    cliente: { type: 'string' },
-                    resumo: {
-                      type: 'object',
-                      properties: {
-                        totalPontosAcumulados: { type: 'integer' },
-                        totalSaldoDisponivel: { type: 'integer' },
-                        totalTransacoes: { type: 'integer' },
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
+          200: jsonResponse('Resumo consultado.', objectAny),
+          400: errorResponse('CodigoCadastro invalido.'),
+          404: errorResponse('Cadastro nao encontrado.'),
+          500: errorResponse('Erro interno.'),
         },
       },
     },
@@ -1002,20 +579,13 @@ const swaggerSpec = {
         tags: ['Fidelidade Ponto'],
         summary: 'Consulta pontos por CodigoCliente',
         parameters: [
-          { name: 'codigoCliente', in: 'path', required: true, schema: { type: 'integer' } },
+          pathParam('codigoCliente', { type: 'integer', example: 123 }, 'CodigoCliente.'),
         ],
         responses: {
-          200: {
-            description: 'Pontos consultados via codigo cliente',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  additionalProperties: true,
-                },
-              },
-            },
-          },
+          200: jsonResponse('Pontos consultados via CodigoCliente.', { $ref: '#/components/schemas/FidelidadePontoResponse' }),
+          400: errorResponse('CodigoCliente invalido.'),
+          404: errorResponse('Cliente nao encontrado.'),
+          500: errorResponse('Erro interno.'),
         },
       },
     },
@@ -1024,238 +594,104 @@ const swaggerSpec = {
         tags: ['Fidelidade Premio'],
         summary: 'Lista premios de fidelidade',
         responses: {
-          200: {
-            description: 'Premios listados',
-            content: {
-              'application/json': {
-                schema: { $ref: '#/components/schemas/FidelidadePremioListResponse' },
-              },
-            },
-          },
+          200: jsonResponse('Premios listados.', { $ref: '#/components/schemas/FidelidadePremioListResponse' }),
+          500: errorResponse('Erro interno.'),
         },
       },
       post: {
         tags: ['Fidelidade Premio'],
-        summary: 'Cria um novo prêmio de fidelidade',
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: { $ref: '#/components/schemas/FidelidadePremioCreateRequest' },
-            },
-          },
-        },
+        summary: 'Cria premio de fidelidade',
+        requestBody: requestBody({ $ref: '#/components/schemas/FidelidadePremioCreateRequest' }),
         responses: {
-          201: {
-            description: 'Prêmio criado',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  properties: {
-                    mensagem: { type: 'string' },
-                    premio: { $ref: '#/components/schemas/FidelidadePremioItem' },
-                  },
-                },
-              },
-            },
-          },
-          400: {
-            description: 'Payload inválido',
-            content: {
-              'application/json': {
-                schema: { $ref: '#/components/schemas/ErrorResponse' },
-              },
-            },
-          },
-          500: {
-            description: 'Erro interno',
-            content: {
-              'application/json': {
-                schema: { $ref: '#/components/schemas/ErrorResponse' },
-              },
-            },
-          },
+          201: jsonResponse('Premio criado.', objectAny),
+          400: errorResponse('Payload invalido.'),
+          500: errorResponse('Erro interno.'),
         },
       },
     },
     '/fidelidade-premio/{codigo}': {
       put: {
         tags: ['Fidelidade Premio'],
-        summary: 'Atualiza um prêmio por CodigoPremio',
+        summary: 'Atualiza premio de fidelidade',
         parameters: [
-          { name: 'codigo', in: 'path', required: true, schema: { type: 'integer' } },
+          pathParam('codigo', { type: 'integer', example: 1 }, 'CodigoPremio.'),
         ],
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: { $ref: '#/components/schemas/FidelidadePremioUpdateRequest' },
-            },
-          },
-        },
+        requestBody: requestBody({ $ref: '#/components/schemas/FidelidadePremioUpdateRequest' }),
         responses: {
-          200: {
-            description: 'Prêmio atualizado',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  properties: {
-                    mensagem: { type: 'string' },
-                    premio: { $ref: '#/components/schemas/FidelidadePremioItem' },
-                  },
-                },
-              },
-            },
-          },
-          400: { description: 'Payload inválido', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
-          404: { description: 'Prêmio não encontrado', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          200: jsonResponse('Premio atualizado.', objectAny),
+          400: errorResponse('Payload ou codigo invalido.'),
+          404: errorResponse('Premio nao encontrado.'),
+          500: errorResponse('Erro interno.'),
         },
       },
       delete: {
         tags: ['Fidelidade Premio'],
-        summary: 'Remove um prêmio por CodigoPremio (soft-delete por padrão)',
+        summary: 'Desativa ou remove premio de fidelidade',
         parameters: [
-          { name: 'codigo', in: 'path', required: true, schema: { type: 'integer' } },
-          { name: 'force', in: 'query', required: false, schema: { type: 'boolean' }, description: 'Se true, realiza exclusão física' },
+          pathParam('codigo', { type: 'integer', example: 1 }, 'CodigoPremio.'),
+          queryParam('force', { type: 'boolean', default: false }, 'true faz exclusao fisica; padrao faz soft-delete.'),
         ],
         responses: {
-          200: { description: 'Prêmio removido', content: { 'application/json': { schema: { type: 'object', additionalProperties: true } } } },
-          404: { description: 'Prêmio não encontrado', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          200: jsonResponse('Premio removido/desativado.', objectAny),
+          400: errorResponse('Codigo invalido.'),
+          404: errorResponse('Premio nao encontrado.'),
+          500: errorResponse('Erro interno.'),
         },
       },
     },
     '/fidelidade-resgate/cliente/{identificador}': {
       get: {
         tags: ['Fidelidade Resgate'],
-        summary: 'Lista resgates e premios de fidelidade por cliente',
+        summary: 'Lista resgates de fidelidade por cliente',
+        description:
+          'O identificador aceita CodigoCliente numerico ou CPFCNPJ. Quando usar CPF/CNPJ com barra, envie a barra URL-encoded.',
         parameters: [
-          { name: 'identificador', in: 'path', required: true, schema: { type: 'string' } },
-          { name: 'incluirDetalhes', in: 'query', schema: { type: 'boolean', default: true } },
+          pathParam('identificador', { type: 'string', example: '12345678901' }, 'CodigoCliente ou CPFCNPJ.'),
+          queryParam('incluirDetalhes', { type: 'boolean', default: true }, 'Inclui origem dos pontos e vinculo comercial.'),
         ],
         responses: {
-          200: {
-            description: 'Resgates retornados com premios e detalhes',
-            content: {
-              'application/json': {
-                schema: { $ref: '#/components/schemas/FidelidadeResgateResponse' },
-              },
-            },
-          },
-          400: {
-            description: 'Identificador invalido',
-            content: {
-              'application/json': {
-                schema: { $ref: '#/components/schemas/ErrorResponse' },
-              },
-            },
-          },
-          404: {
-            description: 'Cliente nao encontrado',
-            content: {
-              'application/json': {
-                schema: { $ref: '#/components/schemas/ErrorResponse' },
-              },
-            },
-          },
+          200: jsonResponse('Resgates retornados.', { $ref: '#/components/schemas/FidelidadeResgateResponse' }),
+          400: errorResponse('Identificador invalido.'),
+          404: errorResponse('Cliente nao encontrado.'),
+          500: errorResponse('Erro interno.'),
         },
       },
     },
     '/fidelidade-resgate/cliente/{identificador}/premios': {
       get: {
         tags: ['Fidelidade Resgate'],
-        summary: 'Lista achatada de todos os premios resgatados por cliente',
+        summary: 'Lista premios resgatados por cliente',
+        description:
+          'Retorna os premios de resgates em formato achatado para consumo pelo front-end.',
         parameters: [
-          { name: 'identificador', in: 'path', required: true, schema: { type: 'string' } },
-          { name: 'incluirDetalhes', in: 'query', schema: { type: 'boolean', default: true } },
+          pathParam('identificador', { type: 'string', example: '12345678901' }, 'CodigoCliente ou CPFCNPJ.'),
+          queryParam('incluirDetalhes', { type: 'boolean', default: true }, 'Inclui origem dos pontos e vinculo comercial.'),
         ],
         responses: {
-          200: {
-            description: 'Lista achatada de prêmios retornada',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  properties: {
-                    mensagem: { type: 'string' },
-                    cliente: { $ref: '#/components/schemas/ClienteMini' },
-                    resumo: {
-                      type: 'object',
-                      properties: {
-                        totalResgates: { type: 'integer' },
-                        totalPontosResgatados: { type: 'integer' },
-                        totalPremios: { type: 'integer' },
-                        periodoAnalisado: {
-                          type: 'object',
-                          properties: {
-                            inicio: { type: 'string', format: 'date-time' },
-                            fim: { type: 'string', format: 'date-time' },
-                          },
-                        },
-                      },
-                    },
-                    premios: {
-                      type: 'array',
-                      items: {
-                        type: 'object',
-                        properties: {
-                          codigoResgate: { type: 'integer' },
-                          codigoLancamento: { type: 'integer' },
-                          dataLancamento: { type: 'string', format: 'date-time' },
-                          pontosResgate: { type: 'integer' },
-                          codigoPremio: { type: 'integer' },
-                          nomePremio: { type: 'string' },
-                          pontos: { type: 'integer' },
-                          quantidade: { type: 'integer' },
-                          total: { type: 'integer' },
-                          premioAtivo: { type: 'boolean' },
-                          origemPontos: { type: 'array', items: { type: 'object', additionalProperties: true } },
-                          vinculoComercial: { type: 'array', items: { type: 'object', additionalProperties: true } },
-                          pontosOrigemCliente: {
-                            type: 'array',
-                            items: {
-                              type: 'object',
-                              properties: {
-                                codigoFidelidade: { type: 'integer' },
-                                dataVencimento: { type: 'string', format: 'date-time' },
-                                pontosOrigem: { type: 'integer' },
-                                saldoOrigem: { type: 'integer' },
-                              },
-                            },
-                          },
-                        },
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-          400: { content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
-          404: { content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+          200: jsonResponse('Premios resgatados retornados.', { $ref: '#/components/schemas/FidelidadeResgatePremiosResponse' }),
+          400: errorResponse('Identificador invalido.'),
+          404: errorResponse('Cliente nao encontrado.'),
+          500: errorResponse('Erro interno.'),
         },
       },
     },
-    '/vendas/cliente/{codigoCadastro}': {
+    '/vendas/cliente/{identificador}': {
       get: {
         tags: ['Vendas'],
-        summary: 'Lista compras e itens por cliente (CodigoCadastro)',
+        summary: 'Lista compras de um cliente',
+        description:
+          'Aceita CodigoCadastro, CodigoCliente ou CPFCNPJ. Quando usar CPF/CNPJ com barra, envie a barra URL-encoded.',
         parameters: [
-          { name: 'codigoCadastro', in: 'path', required: true, schema: { type: 'integer' } },
-          { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
-          { name: 'limit', in: 'query', schema: { type: 'integer', default: 20 } },
-          { name: 'incluirEliminadas', in: 'query', schema: { type: 'boolean', default: false } },
+          pathParam('identificador', { type: 'string', example: '12345678901' }, 'CodigoCadastro, CodigoCliente ou CPFCNPJ.'),
+          queryParam('page', { type: 'integer', default: 1, minimum: 1 }, 'Pagina do resultado.'),
+          queryParam('limit', { type: 'integer', default: 20, minimum: 1, maximum: 200 }, 'Quantidade de vendas por pagina.'),
+          queryParam('incluirEliminadas', { type: 'boolean', default: false }, 'Inclui vendas eliminadas.'),
         ],
         responses: {
-          200: {
-            description: 'Compras retornadas com resumo e detalhes',
-            content: {
-              'application/json': {
-                schema: { $ref: '#/components/schemas/VendasClienteResponse' },
-              },
-            },
-          },
+          200: jsonResponse('Compras retornadas com resumo e itens.', { $ref: '#/components/schemas/VendasClienteResponse' }),
+          400: errorResponse('Identificador invalido.'),
+          404: errorResponse('Cliente nao encontrado.'),
+          500: errorResponse('Erro interno.'),
         },
       },
     },
@@ -1264,6 +700,13 @@ const swaggerSpec = {
 
 const swaggerUiOptions = {
   customSiteTitle: 'Minha API - Swagger',
+  explorer: true,
+  swaggerOptions: {
+    docExpansion: 'none',
+    operationsSorter: 'alpha',
+    tagsSorter: 'alpha',
+    persistAuthorization: true,
+  },
 };
 
 module.exports = {
