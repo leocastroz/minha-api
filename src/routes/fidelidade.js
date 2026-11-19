@@ -101,6 +101,7 @@ router.get('/:codigoCadastro', async (req, res) => {
         SELECT
           SUM(CAST(fp.Pontos AS BIGINT)) AS totalPontosAcumulados,
           SUM(CAST(fp.Saldo AS BIGINT)) AS totalSaldoDisponivel,
+          SUM(CASE WHEN fp.Saldo > 0 AND CAST(fp.DataVencimento AS DATE) >= CAST(GETDATE() AS DATE) THEN CAST(fp.Saldo AS BIGINT) ELSE 0 END) AS totalSaldoValido,
           SUM(CASE WHEN fp.Saldo > 0 THEN CAST(fp.Saldo AS BIGINT) ELSE 0 END) AS totalSaldoAtivo,
           SUM(CASE WHEN fp.Saldo = 0 THEN CAST(fp.Pontos AS BIGINT) ELSE 0 END) AS totalPontosUtilizados,
           COUNT(*) AS totalTransacoes,
@@ -123,6 +124,7 @@ router.get('/:codigoCadastro', async (req, res) => {
       resumoPontos: {
         totalPontosAcumulados: parseInt(totais.totalPontosAcumulados) || 0,
         totalSaldoDisponivel: parseInt(totais.totalSaldoDisponivel) || 0,
+        totalSaldoValido: parseInt(totais.totalSaldoValido) || 0,
         totalSaldoAtivo: parseInt(totais.totalSaldoAtivo) || 0,
         totalPontosUtilizados: parseInt(totais.totalPontosUtilizados) || 0,
         totalTransacoes: totais.totalTransacoes || 0,
@@ -180,6 +182,7 @@ router.get('/:codigoCadastro/resumo', async (req, res) => {
           c.SobreNome,
           ISNULL(SUM(CAST(fp.Pontos AS BIGINT)), 0) AS totalPontosAcumulados,
           ISNULL(SUM(CAST(fp.Saldo AS BIGINT)), 0) AS totalSaldoDisponivel,
+          SUM(CASE WHEN fp.Saldo > 0 AND CAST(fp.DataVencimento AS DATE) >= CAST(GETDATE() AS DATE) THEN CAST(fp.Saldo AS BIGINT) ELSE 0 END) AS totalSaldoValido,
           COUNT(*) AS totalTransacoes
         FROM INOVAFARMA_DPOPPARA.dbo.Cadastro c
         LEFT JOIN INOVAFARMA_DPOPPARA.dbo.Fidelidade_Ponto fp
@@ -203,6 +206,7 @@ router.get('/:codigoCadastro/resumo', async (req, res) => {
       resumo: {
         totalPontosAcumulados: parseInt(resultado.totalPontosAcumulados),
         totalSaldoDisponivel: parseInt(resultado.totalSaldoDisponivel),
+        totalSaldoValido: parseInt(resultado.totalSaldoValido) || 0,
         totalTransacoes: resultado.totalTransacoes
       }
     });
@@ -279,6 +283,7 @@ router.get('/cliente/:codigoCliente', async (req, res) => {
         SELECT
           SUM(CAST(fp.Pontos AS BIGINT)) AS totalPontosAcumulados,
           SUM(CAST(fp.Saldo AS BIGINT)) AS totalSaldoDisponivel,
+          SUM(CASE WHEN fp.Saldo > 0 AND CAST(fp.DataVencimento AS DATE) >= CAST(GETDATE() AS DATE) THEN CAST(fp.Saldo AS BIGINT) ELSE 0 END) AS totalSaldoValido,
           COUNT(*) AS totalTransacoes
         FROM INOVAFARMA_DPOPPARA.dbo.Fidelidade_Ponto fp
         WHERE fp.CodigoCadastro = @codigoCadastro
@@ -293,6 +298,7 @@ router.get('/cliente/:codigoCliente', async (req, res) => {
       resumoPontos: {
         totalPontosAcumulados: parseInt(totais.totalPontosAcumulados) || 0,
         totalSaldoDisponivel: parseInt(totais.totalSaldoDisponivel) || 0,
+        totalSaldoValido: parseInt(totais.totalSaldoValido) || 0,
         totalTransacoes: totais.totalTransacoes || 0
       },
       pontos: pontosQuery.recordset.map(ponto => ({

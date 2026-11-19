@@ -1,5 +1,6 @@
 const express = require('express');
 const { connectDB } = require('../db');
+const { listarPremios } = require('../catalogo-premios');
 
 const router = express.Router();
 
@@ -9,35 +10,12 @@ const router = express.Router();
  */
 router.get('/', async (req, res) => {
   try {
-    const pool = await connectDB();
-
-    const premiosQuery = await pool.request().query(`
-      SELECT
-        fp.CodigoPremio,
-        fp.NomePremio,
-        fp.Pontos,
-        fp.Ativo
-      FROM INOVAFARMA_DPOPPARA.dbo.Fidelidade_Premio fp
-      ORDER BY fp.NomePremio ASC
-    `);
-
-    const premios = premiosQuery.recordset.map((premio) => ({
-      codigoPremio: premio.CodigoPremio,
-      nomePremio: premio.NomePremio,
-      pontos: Number(premio.Pontos) || 0,
-      ativo: premio.Ativo === true,
-    }));
-
-    return res.json({
-      mensagem: 'Prêmios consultados com sucesso',
-      total: premios.length,
-      premios,
-    });
-  } catch (error) {
-    console.error('[ERRO] GET /fidelidade-premio', error.message);
+    return await listarPremios(req, res);
+  } catch (err) {
+    console.error('[ERRO] GET /fidelidade-premio', err.message);
     return res.status(500).json({
       erro: 'Erro ao consultar prêmios de fidelidade',
-      mensagem: error.message,
+      mensagem: err.message,
     });
   }
 });

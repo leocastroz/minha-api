@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { connectDB } = require('../db');
+const bancoAplicacao = '[INOVAFARMA_DPOPPARA]';
 
 function quoteIdentifier(name) {
   return `[${String(name).replace(/]/g, ']]')}]`;
@@ -47,7 +48,7 @@ router.get('/', async (req, res) => {
       SELECT 
         TABLE_SCHEMA AS esquema,
         TABLE_NAME   AS tabela
-      FROM INFORMATION_SCHEMA.TABLES
+      FROM ${bancoAplicacao}.INFORMATION_SCHEMA.TABLES
       WHERE TABLE_TYPE = 'BASE TABLE'
       ORDER BY TABLE_SCHEMA, TABLE_NAME
     `);
@@ -68,7 +69,7 @@ router.get('/:nome/colunas', async (req, res) => {
           COLUMN_NAME   AS coluna,
           DATA_TYPE     AS tipo,
           IS_NULLABLE   AS nulo
-        FROM INFORMATION_SCHEMA.COLUMNS
+        FROM ${bancoAplicacao}.INFORMATION_SCHEMA.COLUMNS
         WHERE TABLE_NAME = @tabela
         ORDER BY ORDINAL_POSITION
       `);
@@ -80,43 +81,61 @@ router.get('/:nome/colunas', async (req, res) => {
 
 // GET /tabelas/:nome/dados — SELECT com paginação
 router.get('/:nome/dados', async (req, res) => {
-  const { page = 1, limit = 50 } = req.query;
-  const offset = (page - 1) * limit;
+  const pagina = Number(req.query.page ?? 1);
+  const limite = Number(req.query.limit ?? 50);
+  const ultimaLinha = pagina * limite;
+  if (!Number.isSafeInteger(pagina) || pagina < 1 || !Number.isSafeInteger(limite) ||
+      limite < 1 || limite > 200 || ultimaLinha > 2147483647) {
+    return res.status(400).json({ error: 'Informe page inteiro positivo e limit entre 1 e 200.' });
+  }
 
   try {
     const pool = await connectDB();
-
-    // Valida nome da tabela para evitar SQL injection
-    const tabelaValida = await pool.request()
+    const metadata = await pool.request()
       .input('tabela', req.params.nome)
       .query(`
-        SELECT COUNT(*) AS total
-        FROM INFORMATION_SCHEMA.TABLES
-        WHERE TABLE_NAME = @tabela
+        SELECT TOP 1 TABLE_SCHEMA AS esquema, TABLE_NAME AS tabela
+        FROM ${bancoAplicacao}.INFORMATION_SCHEMA.TABLES
+        WHERE TABLE_NAME = @tabela AND TABLE_TYPE = 'BASE TABLE'
+        ORDER BY CASE WHEN TABLE_SCHEMA = 'dbo' THEN 0 ELSE 1 END, TABLE_SCHEMA
       `);
+    const tabela = metadata.recordset[0];
+    if (!tabela) return res.status(404).json({ error: 'Tabela não encontrada' });
 
-    if (tabelaValida.recordset[0].total === 0) {
-      return res.status(404).json({ error: 'Tabela não encontrada' });
-    }
+    const colunas = await pool.request()
+      .input('tabela', tabela.tabela)
+      .input('esquema', tabela.esquema)
+      .query(`
+        SELECT COLUMN_NAME AS nome
+        FROM ${bancoAplicacao}.INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_NAME = @tabela AND TABLE_SCHEMA = @esquema
+        ORDER BY ORDINAL_POSITION
+      `);
+    const nomes = colunas.recordset.map(coluna => coluna.nome);
+    if (nomes.length === 0) return res.status(404).json({ error: 'Tabela não encontrada' });
+    const campos = nomes.map(quoteIdentifier).join(', ');
+    const nomesNormalizados = new Set(nomes.map(nome => nome.toLowerCase()));
+    let nomeLinha = '__numero_linha_api';
+    while (nomesNormalizados.has(nomeLinha)) nomeLinha += '_';
+    const linha = quoteIdentifier(nomeLinha);
+    const origem = `${bancoAplicacao}.${quoteIdentifier(tabela.esquema)}.${quoteIdentifier(tabela.tabela)}`;
 
     const result = await pool.request()
-      .input('limit', Number(limit))
-      .input('offset', Number(offset))
+      .input('primeiraLinha', ultimaLinha - limite + 1)
+      .input('ultimaLinha', ultimaLinha)
       .query(`
-        SELECT * FROM ${req.params.nome}
-        ORDER BY (SELECT NULL)
-        OFFSET @offset ROWS
-        FETCH NEXT @limit ROWS ONLY
+        WITH paginada AS (
+          SELECT ${campos}, ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS ${linha}
+          FROM ${origem}
+        )
+        SELECT ${campos} FROM paginada
+        WHERE ${linha} BETWEEN @primeiraLinha AND @ultimaLinha
+        ORDER BY ${linha}
       `);
 
-    res.json({
-      pagina: Number(page),
-      limite: Number(limit),
-      total: result.recordset.length,
-      dados: result.recordset,
-    });
+    return res.json({ pagina, limite, total: result.recordset.length, dados: result.recordset });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: err.message });
   }
 });
 
@@ -180,14 +199,14 @@ router.get('/cadastro/diagnostico', async (req, res) => {
         rt.name AS referencedTable,
         rc.name AS referencedColumn,
         fk.name AS fkName
-      FROM sys.foreign_key_columns fkc
-      JOIN sys.foreign_keys fk ON fk.object_id = fkc.constraint_object_id
-      JOIN sys.tables pt ON pt.object_id = fkc.parent_object_id
-      JOIN sys.schemas ps ON ps.schema_id = pt.schema_id
-      JOIN sys.columns pc ON pc.object_id = pt.object_id AND pc.column_id = fkc.parent_column_id
-      JOIN sys.tables rt ON rt.object_id = fkc.referenced_object_id
-      JOIN sys.schemas rs ON rs.schema_id = rt.schema_id
-      JOIN sys.columns rc ON rc.object_id = rt.object_id AND rc.column_id = fkc.referenced_column_id
+      FROM ${bancoAplicacao}.sys.foreign_key_columns fkc
+      JOIN ${bancoAplicacao}.sys.foreign_keys fk ON fk.object_id = fkc.constraint_object_id
+      JOIN ${bancoAplicacao}.sys.tables pt ON pt.object_id = fkc.parent_object_id
+      JOIN ${bancoAplicacao}.sys.schemas ps ON ps.schema_id = pt.schema_id
+      JOIN ${bancoAplicacao}.sys.columns pc ON pc.object_id = pt.object_id AND pc.column_id = fkc.parent_column_id
+      JOIN ${bancoAplicacao}.sys.tables rt ON rt.object_id = fkc.referenced_object_id
+      JOIN ${bancoAplicacao}.sys.schemas rs ON rs.schema_id = rt.schema_id
+      JOIN ${bancoAplicacao}.sys.columns rc ON rc.object_id = rt.object_id AND rc.column_id = fkc.referenced_column_id
       WHERE rt.name = 'Cadastro' AND rs.name = 'dbo'
       ORDER BY ps.name, pt.name, fk.name
     `);
@@ -231,7 +250,7 @@ router.get('/cadastro/diagnostico', async (req, res) => {
 
       const countResult = await request.query(`
         SELECT COUNT(1) AS total
-        FROM ${schema}.${tabela}
+        FROM ${bancoAplicacao}.${schema}.${tabela}
         WHERE ${where}
       `);
 
@@ -247,7 +266,7 @@ router.get('/cadastro/diagnostico', async (req, res) => {
             c.TABLE_NAME AS tableName,
             c.COLUMN_NAME AS columnName,
             c.DATA_TYPE AS dataType
-          FROM INFORMATION_SCHEMA.COLUMNS c
+          FROM ${bancoAplicacao}.INFORMATION_SCHEMA.COLUMNS c
           WHERE c.TABLE_NAME <> 'Cadastro'
             AND c.COLUMN_NAME IN ('CodigoCadastro', 'CodigoLancamento', 'CPFCNPJ', 'Nome', 'SobreNome', 'CodigoEmpresa')
           ORDER BY c.TABLE_SCHEMA, c.TABLE_NAME, c.COLUMN_NAME
@@ -267,11 +286,11 @@ router.get('/cadastro/diagnostico', async (req, res) => {
 
         const query = `
           SELECT COUNT(1) AS total
-          FROM ${schema}.${table}
+          FROM ${bancoAplicacao}.${schema}.${table}
           WHERE ${column} = @valor;
 
           SELECT TOP (@sample) *
-          FROM ${schema}.${table}
+          FROM ${bancoAplicacao}.${schema}.${table}
           WHERE ${column} = @valor;
         `;
 
@@ -436,7 +455,7 @@ router.get('/cadastro/varredura-geral', async (req, res) => {
         SELECT
           t.TABLE_SCHEMA AS schemaName,
           t.TABLE_NAME AS tableName
-        FROM INFORMATION_SCHEMA.TABLES t
+        FROM ${bancoAplicacao}.INFORMATION_SCHEMA.TABLES t
         WHERE t.TABLE_TYPE = 'BASE TABLE'
           AND NOT (t.TABLE_SCHEMA = 'dbo' AND t.TABLE_NAME = 'Cadastro')
         ORDER BY t.TABLE_SCHEMA, t.TABLE_NAME
@@ -457,7 +476,7 @@ router.get('/cadastro/varredura-geral', async (req, res) => {
           SELECT
             c.COLUMN_NAME AS columnName,
             c.DATA_TYPE AS dataType
-          FROM INFORMATION_SCHEMA.COLUMNS c
+          FROM ${bancoAplicacao}.INFORMATION_SCHEMA.COLUMNS c
           WHERE c.TABLE_SCHEMA = @schemaName
             AND c.TABLE_NAME = @tableName
         `);
@@ -479,11 +498,11 @@ router.get('/cadastro/varredura-geral', async (req, res) => {
 
           const query = `
             SELECT COUNT(1) AS total
-            FROM ${schema}.${table}
+            FROM ${bancoAplicacao}.${schema}.${table}
             WHERE ${column} IN (${params.join(', ')});
 
             SELECT TOP (@sample) *
-            FROM ${schema}.${table}
+            FROM ${bancoAplicacao}.${schema}.${table}
             WHERE ${column} IN (${params.join(', ')});
           `;
 
@@ -519,11 +538,11 @@ router.get('/cadastro/varredura-geral', async (req, res) => {
           const where = whereParts.join(' OR ');
           const query = `
             SELECT COUNT(1) AS total
-            FROM ${schema}.${table}
+            FROM ${bancoAplicacao}.${schema}.${table}
             WHERE ${where};
 
             SELECT TOP (@sample) *
-            FROM ${schema}.${table}
+            FROM ${bancoAplicacao}.${schema}.${table}
             WHERE ${where};
           `;
 

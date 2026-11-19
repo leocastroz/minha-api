@@ -1,10 +1,11 @@
 const sql = require('mssql');
+require('dotenv').config();
 
 const config = {
-  user: process.argv[2] || 'sa',
-  password: process.argv[3] || 'inovafarmaI',
-  server: process.argv[4] || '100.102.124.30',
-  port: Number(process.argv[5] || 1433),
+  user: process.argv[2] || process.env.DB_USER,
+  password: process.argv[3] || process.env.DB_PASSWORD,
+  server: process.argv[4] || process.env.DB_HOST,
+  port: Number(process.argv[5] || process.env.DB_PORT || 1433),
   database: 'INOVAFARMA_DPOPPARA',
   options: {
     trustServerCertificate: true,
